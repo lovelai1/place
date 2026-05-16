@@ -1597,7 +1597,7 @@ ClassConfig.Warrior = {
 }
 
 ClassConfig.Paladin = {
-	PrimaryStat = "Strength", ResourceType = "HolyPower", BaseHealth = 1100, BaseResource = 5, BaseArmor = 300, BaseAttackPower = 70, BaseSpellPower = 40,
+	PrimaryStat = "Strength", ResourceType = "Mana", BaseHealth = 1100, BaseResource = 100, BaseArmor = 300, BaseAttackPower = 70, BaseSpellPower = 40,
 	AvailableRoles = { "Tank", "Healer", "DPS" },
 	StatMultipliers = { AttackPowerPerStrength = 2.0, SpellPowerPerStrength = 0.5, SpellPowerPerIntellect = 1.0, HealthPerStamina = 14 },
 	ResourceBehaviour = { GeneratesOnAbility = true, MaxCharges = 5, ChargeExpiry = false, BaseRegen = 0 },
@@ -2006,6 +2006,9 @@ export type PlayerData = {
 	Professions: { [string]: ProfessionData },
 	DungeonProgress: { [string]: DungeonProgressData },
 	ArenaProfile: ArenaProfileData,
+	CurrentHealth: number,
+	CurrentResource: number,
+	ResourceType: string,
 	AbilityCooldowns: { [string]: number },
 	Settings: { [string]: any },
 }
@@ -2017,6 +2020,9 @@ local DEFAULT_DATA: PlayerData = {
 	Gold = 0,
 	SelectedClass = "",
 	SelectedRole = "",
+	CurrentHealth = 100,
+	CurrentResource = 100,
+	ResourceType = "Mana",
 	Stats = {
 		Strength = 1,
 		Agility = 1,
@@ -2096,6 +2102,13 @@ end
 function PlayerDataConfig.Reconcile(existing: { [any]: any }, template: { [any]: any }?): { [any]: any }
 	return PlayerDataConfig.MergeDefaults(existing, template or DEFAULT_DATA)
 end
+
+-- BackFill is a compatibility alias for services/tests that use this schema term.
+function PlayerDataConfig.BackFill(existing: { [any]: any }): { [any]: any }
+	return PlayerDataConfig.Reconcile(existing, DEFAULT_DATA)
+end
+
+PlayerDataConfig.Defaults = DEFAULT_DATA
 
 return PlayerDataConfig
 ]]></ProtectedString>
@@ -3236,6 +3249,387 @@ return ClassValidator
 					<UniqueId name="UniqueId">fa17731b3f9144218035985e64ad9fb8</UniqueId>
 				</Properties>
 
+			<Item class="ModuleScript" referent="RBX98220A2E58BE43AC982560ACCA2FEC40">
+				<Properties>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+					<string name="Name">CombatService</string>
+					<ProtectedString name="Source"><![CDATA[--!strict
+-- Server-authoritative combat core for GhostyRPG.
+-- Handles ability validation, session cooldowns, resource spending, damage, and healing.
+-- No remotes. No UI. No mob AI.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local SharedConfig = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config")
+local Server = ServerScriptService:WaitForChild("Server")
+
+local AbilityConfig = require(SharedConfig:WaitForChild("AbilityConfig"))
+local AbilityValidator = require(Server:WaitForChild("Validators"):WaitForChild("AbilityValidator"))
+
+local CombatService = {}
+
+local playerDataService: any = nil
+local statsService: any = nil
+local initialized = false
+
+export type CombatResult = {
+	success: boolean,
+	reason: string?,
+	amount: number?,
+}
+
+local function result(success: boolean, reason: string?, amount: number?): CombatResult
+	return { success = success, reason = reason, amount = amount }
+end
+
+local function assertInitialized()
+	assert(initialized and playerDataService and statsService, "CombatService requires Init(playerDataService, statsService) before use.")
+end
+
+local function now(): number
+	return os.clock()
+end
+
+local function clamp(value: number, minValue: number, maxValue: number): number
+	return math.max(minValue, math.min(maxValue, value))
+end
+
+local function getPlayerData(player: Player): { [string]: any }
+	local data = playerDataService.GetData(player)
+	if not data then
+		error(string.format("[CombatService] No PlayerData for %s.", player.Name))
+	end
+	return data
+end
+
+local function getStats(player: Player): { [string]: any }?
+	local ok, stats = pcall(statsService.GetStats, player)
+	if ok and type(stats) == "table" then
+		return stats
+	end
+
+	if type(statsService.Recalculate) == "function" then
+		local recalcOk, recalculated = pcall(statsService.Recalculate, player)
+		if recalcOk and type(recalculated) == "table" then
+			return recalculated
+		end
+	end
+
+	return nil
+end
+
+local function getCooldownMap(data: { [string]: any }): { [string]: number }
+	if type(data.AbilityCooldowns) ~= "table" then
+		data.AbilityCooldowns = {}
+	end
+	return data.AbilityCooldowns
+end
+
+local function getResourceType(data: { [string]: any }): string
+	if type(data.ResourceType) == "string" and data.ResourceType ~= "" then
+		return data.ResourceType
+	end
+	local stats = data.Stats
+	if type(stats) == "table" and type(stats.ResourceType) == "string" then
+		return stats.ResourceType
+	end
+	return ""
+end
+
+local function getMaxResource(data: { [string]: any }, stats: { [string]: any }?): number
+	if stats and type(stats.MaxResource) == "number" then
+		return stats.MaxResource
+	end
+	if type(data.MaxResource) == "number" then
+		return data.MaxResource
+	end
+	local dataStats = data.Stats
+	if type(dataStats) == "table" and type(dataStats.MaxResource) == "number" then
+		return dataStats.MaxResource
+	end
+	return 100
+end
+
+local function syncResourceFields(data: { [string]: any }, stats: { [string]: any }?)
+	local maxResource = getMaxResource(data, stats)
+	local currentResource = data.CurrentResource
+	local dataStats = data.Stats
+
+	if type(currentResource) ~= "number" and type(dataStats) == "table" and type(dataStats.Resource) == "number" then
+		currentResource = dataStats.Resource
+	end
+	if type(currentResource) ~= "number" then
+		currentResource = maxResource
+	end
+
+	currentResource = clamp(currentResource, 0, maxResource)
+	data.CurrentResource = currentResource
+	data.ResourceType = getResourceType(data)
+
+	if type(dataStats) ~= "table" then
+		data.Stats = {}
+		dataStats = data.Stats
+	end
+	dataStats.Resource = currentResource
+	dataStats.MaxResource = maxResource
+	dataStats.ResourceType = data.ResourceType
+end
+
+local function getMaxHealth(data: { [string]: any }, stats: { [string]: any }?): number
+	if stats and type(stats.MaxHealth) == "number" then
+		return stats.MaxHealth
+	end
+	local dataStats = data.Stats
+	if type(dataStats) == "table" and type(dataStats.MaxHealth) == "number" then
+		return dataStats.MaxHealth
+	end
+	if type(data.MaxHealth) == "number" then
+		return data.MaxHealth
+	end
+	return 100
+end
+
+local function syncHealthFields(data: { [string]: any }, stats: { [string]: any }?)
+	local maxHealth = getMaxHealth(data, stats)
+	local currentHealth = data.CurrentHealth
+	local dataStats = data.Stats
+
+	if type(currentHealth) ~= "number" and type(dataStats) == "table" and type(dataStats.HP) == "number" then
+		currentHealth = dataStats.HP
+	end
+	if type(currentHealth) ~= "number" then
+		currentHealth = maxHealth
+	end
+
+	currentHealth = clamp(currentHealth, 0, maxHealth)
+	data.CurrentHealth = currentHealth
+	if type(dataStats) == "table" then
+		dataStats.HP = currentHealth
+		dataStats.MaxHealth = maxHealth
+	end
+end
+
+local function isOnCooldown(data: { [string]: any }, abilityId: string): boolean
+	local expiry = getCooldownMap(data)[abilityId]
+	return type(expiry) == "number" and expiry > now()
+end
+
+local function setCooldown(data: { [string]: any }, abilityId: string, durationSeconds: number)
+	if durationSeconds > 0 then
+		getCooldownMap(data)[abilityId] = now() + durationSeconds
+	end
+end
+
+local function mutateHealth(targetContext: { [string]: any }, delta: number): number
+	if typeof(targetContext.targetPlayer) == "Instance" and targetContext.targetPlayer:IsA("Player") then
+		local targetPlayer = targetContext.targetPlayer :: Player
+		local data = playerDataService.GetData(targetPlayer)
+		if not data then
+			return 0
+		end
+
+		local stats = getStats(targetPlayer)
+		syncHealthFields(data, stats)
+		local maxHealth = getMaxHealth(data, stats)
+		local before = data.CurrentHealth
+		data.CurrentHealth = clamp(before + delta, 0, maxHealth)
+		if type(data.Stats) == "table" then
+			data.Stats.HP = data.CurrentHealth
+		end
+		if type(playerDataService.ScheduleSave) == "function" then
+			playerDataService.ScheduleSave(targetPlayer)
+		end
+		return data.CurrentHealth - before
+	end
+
+	if typeof(targetContext.targetModel) == "Instance" and targetContext.targetModel:IsA("Model") then
+		local model = targetContext.targetModel :: Model
+		local maxHealth = model:GetAttribute("MaxHealth")
+		local currentHealth = model:GetAttribute("Health")
+		if type(maxHealth) ~= "number" or type(currentHealth) ~= "number" then
+			return 0
+		end
+
+		local newHealth = clamp(currentHealth + delta, 0, maxHealth)
+		model:SetAttribute("Health", newHealth)
+		return newHealth - currentHealth
+	end
+
+	return 0
+end
+
+function CombatService.Init(newPlayerDataService: any, newStatsService: any)
+	if initialized then
+		warn("[CombatService] Init called more than once; ignoring duplicate call.")
+		return
+	end
+
+	assert(newPlayerDataService, "CombatService.Init requires PlayerDataService.")
+	assert(newPlayerDataService.GetData, "CombatService.Init requires PlayerDataService.GetData.")
+	assert(newPlayerDataService.ScheduleSave, "CombatService.Init requires PlayerDataService.ScheduleSave.")
+	assert(newStatsService, "CombatService.Init requires StatsService.")
+	assert(newStatsService.GetStats, "CombatService.Init requires StatsService.GetStats.")
+	assert(newStatsService.Recalculate, "CombatService.Init requires StatsService.Recalculate.")
+
+	playerDataService = newPlayerDataService
+	statsService = newStatsService
+	initialized = true
+	print("[CombatService] Initialized.")
+end
+
+function CombatService.IsInitialized(): boolean
+	return initialized
+end
+
+function CombatService.UseAbility(casterPlayer: Player, abilityId: string, targetContext: { [string]: any }?): CombatResult
+	assertInitialized()
+	assert(typeof(casterPlayer) == "Instance" and casterPlayer:IsA("Player"), "CombatService.UseAbility requires a Player caster.")
+	assert(type(abilityId) == "string" and abilityId ~= "", "CombatService.UseAbility requires a non-empty abilityId.")
+
+	targetContext = targetContext or {}
+	local ability = AbilityConfig.GetAbility(abilityId)
+	if not ability then
+		return result(false, "unknown_ability", nil)
+	end
+
+	local data = getPlayerData(casterPlayer)
+	local stats = getStats(casterPlayer)
+	syncHealthFields(data, stats)
+	syncResourceFields(data, stats)
+
+	-- AbilityValidator owns level/class/role/resource validation. CombatService owns absolute expiry cooldowns.
+	local validation = AbilityValidator.CanUseAbility(data, abilityId, now(), nil)
+	if not validation.success then
+		return result(false, validation.reason or "validation_failed", nil)
+	end
+
+	if isOnCooldown(data, abilityId) then
+		return result(false, "on_cooldown", nil)
+	end
+
+	local resourceCost = if type(ability.resourceCost) == "number" then ability.resourceCost else 0
+	if resourceCost > 0 and data.CurrentResource < resourceCost then
+		return result(false, "insufficient_resource", nil)
+	end
+
+	if resourceCost > 0 then
+		local spendResult = CombatService.SpendResource(casterPlayer, resourceCost)
+		if not spendResult.success then
+			return result(false, spendResult.reason or "spend_failed", nil)
+		end
+	end
+
+	setCooldown(data, abilityId, if type(ability.cooldown) == "number" then ability.cooldown else 0)
+
+	local amount = 0
+	if ability.effectType == "Damage" then
+		local attackPower = if stats and type(stats.AttackPower) == "number" then stats.AttackPower else 10
+		local power = if type(ability.power) == "number" then ability.power else 1
+		local damage = math.max(1, math.floor(attackPower * power))
+		amount = CombatService.ApplyDamage(casterPlayer, targetContext, damage, ability.tags and ability.tags[1] or "Physical").amount or 0
+	elseif ability.effectType == "Heal" then
+		local healingPower = if stats and type(stats.HealingPower) == "number" then stats.HealingPower elseif stats and type(stats.SpellPower) == "number" then stats.SpellPower else 10
+		local power = if type(ability.power) == "number" then ability.power else 1
+		local healing = math.max(1, math.floor(healingPower * power))
+		amount = CombatService.ApplyHeal(casterPlayer, targetContext, healing).amount or 0
+	elseif ability.effectType == "ResourceGain" then
+		local maxResource = getMaxResource(data, stats)
+		local restoreAmount = math.max(1, math.floor(maxResource * (ability.power or 0)))
+		amount = CombatService.RestoreResource(casterPlayer, restoreAmount).amount or 0
+	end
+
+	if type(playerDataService.ScheduleSave) == "function" then
+		playerDataService.ScheduleSave(casterPlayer)
+	end
+	return result(true, nil, amount)
+end
+
+function CombatService.ApplyDamage(_source: Player | string, targetContext: { [string]: any }?, amount: number, _damageType: string?): CombatResult
+	assertInitialized()
+	targetContext = targetContext or {}
+	amount = math.max(0, amount or 0)
+	if amount <= 0 then
+		return result(true, nil, 0)
+	end
+	local actualDelta = mutateHealth(targetContext, -amount)
+	return result(true, nil, math.abs(actualDelta))
+end
+
+function CombatService.ApplyHeal(_source: Player | string, targetContext: { [string]: any }?, amount: number): CombatResult
+	assertInitialized()
+	targetContext = targetContext or {}
+	amount = math.max(0, amount or 0)
+	if amount <= 0 then
+		return result(true, nil, 0)
+	end
+	return result(true, nil, mutateHealth(targetContext, amount))
+end
+
+function CombatService.SpendResource(player: Player, amount: number): CombatResult
+	assertInitialized()
+	amount = math.max(0, amount or 0)
+	local data = getPlayerData(player)
+	local stats = getStats(player)
+	syncResourceFields(data, stats)
+	local maxResource = getMaxResource(data, stats)
+	if data.CurrentResource < amount then
+		return result(false, "insufficient_resource", nil)
+	end
+	local before = data.CurrentResource
+	data.CurrentResource = clamp(before - amount, 0, maxResource)
+	syncResourceFields(data, stats)
+	return result(true, nil, before - data.CurrentResource)
+end
+
+function CombatService.RestoreResource(player: Player, amount: number): CombatResult
+	assertInitialized()
+	amount = math.max(0, amount or 0)
+	local data = getPlayerData(player)
+	local stats = getStats(player)
+	syncResourceFields(data, stats)
+	local maxResource = getMaxResource(data, stats)
+	local before = data.CurrentResource
+	data.CurrentResource = clamp(before + amount, 0, maxResource)
+	syncResourceFields(data, stats)
+	return result(true, nil, data.CurrentResource - before)
+end
+
+function CombatService.GetCooldowns(player: Player): { [string]: number }
+	assertInitialized()
+	local data = getPlayerData(player)
+	local cooldowns = getCooldownMap(data)
+	local currentTime = now()
+	local snapshot = {}
+
+	for abilityId, expiry in pairs(cooldowns) do
+		if type(expiry) == "number" then
+			local remaining = expiry - currentTime
+			if remaining > 0 then
+				snapshot[abilityId] = remaining
+			else
+				cooldowns[abilityId] = nil
+			end
+		else
+			cooldowns[abilityId] = nil
+		end
+	end
+
+	return snapshot
+end
+
+return CombatService
+]]></ProtectedString>
+					<int64 name="SourceAssetId">-1</int64>
+					<BinaryString name="Tags"></BinaryString>
+					<UniqueId name="UniqueId">7e31b30cfc6b455c8cdf63a7e67f701c</UniqueId>
+				</Properties>
+			</Item>
+
+
 				<Item class="ModuleScript" referent="RBX9E86B1116C474E2B8ED99C144C5311C2">
 					<Properties>
 						<BinaryString name="AttributesSerialize"></BinaryString>
@@ -4295,8 +4689,10 @@ return StatsService
 						<ProtectedString name="Source"><![CDATA[--!strict
 -- Server-authoritative class and role selection for GhostyRPG.
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local ClassValidator = require(ServerScriptService:WaitForChild("Server"):WaitForChild("Validators"):WaitForChild("ClassValidator"))
+local ClassConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"):WaitForChild("ClassConfig"))
 
 local ClassService = {}
 
@@ -4306,6 +4702,22 @@ local initialized = false
 
 local function assertInitialized()
 	assert(initialized and playerDataService and statsService, "ClassService requires Init(playerDataService, statsService) before use.")
+end
+
+local function applyClassResource(data: { [string]: any }, className: string)
+	local classData = ClassConfig[className]
+	local resourceType = if classData and type(classData.ResourceType) == "string" then classData.ResourceType else ""
+	local maxResource = if classData and type(classData.BaseResource) == "number" then classData.BaseResource else 100
+
+	data.ResourceType = resourceType
+	if type(data.CurrentResource) ~= "number" then
+		data.CurrentResource = maxResource
+	end
+	if type(data.Stats) == "table" then
+		data.Stats.ResourceType = resourceType
+		data.Stats.Resource = data.CurrentResource
+		data.Stats.MaxResource = data.Stats.MaxResource or maxResource
+	end
 end
 
 function ClassService.Init(newPlayerDataService: any, newStatsService: any)
@@ -4342,6 +4754,7 @@ function ClassService.SelectClass(player: Player, className: string): (boolean, 
 	data.SelectedClass = className
 	data.SelectedRole = ""
 	statsService.Recalculate(player)
+	applyClassResource(data, className)
 	playerDataService.ScheduleSave(player)
 	return true, nil
 end
@@ -4450,6 +4863,7 @@ local classValidator = require(Validators:WaitForChild("ClassValidator") :: Modu
 local playerDataService = require(Server:WaitForChild("Services"):WaitForChild("PlayerDataService") :: ModuleScript)
 local inventoryService = require(Server:WaitForChild("Services"):WaitForChild("InventoryService") :: ModuleScript)
 local statsService = require(Server:WaitForChild("Services"):WaitForChild("StatsService") :: ModuleScript)
+local combatService = require(Server:WaitForChild("Services"):WaitForChild("CombatService") :: ModuleScript)
 local classService = require(Server:WaitForChild("Services"):WaitForChild("ClassService") :: ModuleScript)
 require(Server:WaitForChild("Services"):WaitForChild("QuestService") :: ModuleScript)
 
@@ -4484,6 +4898,12 @@ end
 for _, methodName in ipairs({ "Init", "SelectClass", "SelectRole", "GetClass", "GetRole" }) do
 	record(string.format("ClassService.%s", methodName), type(classService[methodName]) == "function")
 end
+
+for _, methodName in ipairs({ "Init", "IsInitialized", "UseAbility", "ApplyDamage", "ApplyHeal", "SpendResource", "RestoreResource", "GetCooldowns" }) do
+	record(string.format("CombatService.%s", methodName), type(combatService[methodName]) == "function")
+end
+record("CombatService.IsInitialized() false before Init", combatService.IsInitialized() == false)
+
 
 for _, className in ipairs({ "Warrior", "Paladin", "Mage", "Priest", "Rogue", "Hunter" }) do
 	local abilities = abilityConfig.GetClassAbilities(className)
@@ -4567,16 +4987,27 @@ end
 
 local okData, data = pcall(playerDataConfig.DeepCopyDefault)
 if okData and type(data) == "table" then
-	for _, key in ipairs({ "Version", "Level", "Exp", "Gold", "SelectedClass", "SelectedRole", "Stats", "Inventory", "Equipment", "ActiveQuests", "CompletedQuests", "Professions", "DungeonProgress", "ArenaProfile", "AbilityCooldowns", "Settings" }) do
+	for _, key in ipairs({ "Version", "Level", "Exp", "Gold", "SelectedClass", "SelectedRole", "CurrentHealth", "CurrentResource", "ResourceType", "Stats", "Inventory", "Equipment", "ActiveQuests", "CompletedQuests", "Professions", "DungeonProgress", "ArenaProfile", "AbilityCooldowns", "Settings" }) do
 		record(string.format("PlayerData default has %s", key), data[key] ~= nil)
 	end
 	record("PlayerData default has Stats.Resource", type(data.Stats) == "table" and type(data.Stats.Resource) == "number")
 	record("PlayerData default has Stats.MaxResource", type(data.Stats) == "table" and type(data.Stats.MaxResource) == "number")
 	record("PlayerData default has Stats.ResourceType", type(data.Stats) == "table" and type(data.Stats.ResourceType) == "string")
+	record("PlayerData default has CurrentHealth", type(data.CurrentHealth) == "number")
+	record("PlayerData default has CurrentResource", type(data.CurrentResource) == "number")
+	record("PlayerData default has ResourceType", type(data.ResourceType) == "string")
 else
 	record("PlayerDataConfig.DeepCopyDefault", false, "failed or returned non-table")
 end
 record("PlayerDataConfig.Reconcile", type(playerDataConfig.Reconcile) == "function")
+record("PlayerDataConfig.BackFill", type(playerDataConfig.BackFill) == "function")
+if type(playerDataConfig.BackFill) == "function" then
+	local existing = { CurrentHealth = 42 }
+	playerDataConfig.BackFill(existing)
+	record("BackFill preserves existing CurrentHealth", existing.CurrentHealth == 42)
+	record("BackFill adds CurrentResource", type(existing.CurrentResource) == "number")
+	record("BackFill adds AbilityCooldowns", type(existing.AbilityCooldowns) == "table")
+end
 
 local fallbackStats = statsService.CalculateFromData({ Level = 1, SelectedClass = "", SelectedRole = "", Equipment = {} })
 for _, key in ipairs({ "MaxHealth", "MaxResource", "AttackPower", "Armor", "HP", "MP", "Attack", "Defense", "Speed" }) do
@@ -4615,15 +5046,17 @@ local Server = ServerScriptService:WaitForChild("Server")
 local Services = Server:WaitForChild("Services")
 
 local PlayerDataService = require(Services:WaitForChild("PlayerDataService"))
-local InventoryService = require(Services:WaitForChild("InventoryService"))
 local StatsService = require(Services:WaitForChild("StatsService"))
+local CombatService = require(Services:WaitForChild("CombatService"))
 local ClassService = require(Services:WaitForChild("ClassService"))
+local InventoryService = require(Services:WaitForChild("InventoryService"))
 local QuestService = require(Services:WaitForChild("QuestService"))
 
 PlayerDataService.Init()
-InventoryService.Init(PlayerDataService)
 StatsService.Init(PlayerDataService)
+CombatService.Init(PlayerDataService, StatsService)
 ClassService.Init(PlayerDataService, StatsService)
+InventoryService.Init(PlayerDataService)
 QuestService.Init(PlayerDataService, InventoryService)
 
 local function onPlayerAdded(player: Player)
