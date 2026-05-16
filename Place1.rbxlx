@@ -1567,6 +1567,9 @@ GameEnums.ItemRarity = { Common = "Common" :: ItemRarity, Uncommon = "Uncommon" 
 GameEnums.StatType = { Strength = "Strength" :: StatType, Agility = "Agility" :: StatType, Intellect = "Intellect" :: StatType, Stamina = "Stamina" :: StatType, Spirit = "Spirit" :: StatType }
 GameEnums.EquipmentSlot = { Head = "Head" :: EquipmentSlot, Shoulders = "Shoulders" :: EquipmentSlot, Chest = "Chest" :: EquipmentSlot, Legs = "Legs" :: EquipmentSlot, Feet = "Feet" :: EquipmentSlot, Hands = "Hands" :: EquipmentSlot, Waist = "Waist" :: EquipmentSlot, Wrist = "Wrist" :: EquipmentSlot, Back = "Back" :: EquipmentSlot, MainHand = "MainHand" :: EquipmentSlot, OffHand = "OffHand" :: EquipmentSlot, Ranged = "Ranged" :: EquipmentSlot, Necklace = "Necklace" :: EquipmentSlot, Ring1 = "Ring1" :: EquipmentSlot, Ring2 = "Ring2" :: EquipmentSlot, Trinket1 = "Trinket1" :: EquipmentSlot, Trinket2 = "Trinket2" :: EquipmentSlot }
 
+GameEnums.QuestStatus = { Active = "Active", ReadyToTurnIn = "ReadyToTurnIn", TurnedIn = "TurnedIn", Abandoned = "Abandoned", Failed = "Failed" }
+GameEnums.QuestObjectiveType = { Kill = "Kill", Collect = "Collect", Talk = "Talk", Explore = "Explore", Craft = "Craft", Escort = "Escort" }
+
 return GameEnums
 ]]></ProtectedString>
 						<int64 name="SourceAssetId">-1</int64>
@@ -1685,7 +1688,221 @@ return StatFormulas
 						<UniqueId name="UniqueId">a3a58f4aa4c64cec83390ca5bda450ad</UniqueId>
 					</Properties>
 				</Item>
+
+				<Item class="ModuleScript" referent="RBX027F0D9F57EF469C8087463BEB4DFD5F">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">QuestsConfig</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Public quest definitions for GhostyRPG.
+-- Keep rewards out of this module; client can require this data.
+
+export type QuestObjectiveDef = {
+	id: string,
+	objectiveType: string,
+	description: string,
+	targetId: string,
+	required: number,
+}
+
+export type QuestDef = {
+	id: string,
+	name: string,
+	description: string,
+	levelRequirement: number,
+	prerequisiteQuests: { string },
+	repeatable: boolean,
+	timeLimit: number?,
+	objectives: { QuestObjectiveDef },
+}
+
+local QuestsConfig = {}
+
+QuestsConfig.Quests = {
+	quest_001_first_steps = {
+		id = "quest_001_first_steps",
+		name = "First Steps",
+		description = "Prove yourself by defeating the first creatures haunting the Ghostwood outskirts.",
+		levelRequirement = 1,
+		prerequisiteQuests = {},
+		repeatable = false,
+		objectives = {
+			{ id = "obj_kill_slimes", objectiveType = "Kill", description = "Defeat Ghost Slimes", targetId = "mob_ghost_slime", required = 5 },
+		},
+	},
+
+	quest_002_mistleaf_aid = {
+		id = "quest_002_mistleaf_aid",
+		name = "Mistleaf Aid",
+		description = "Gather mistleaf for the village alchemist before the dusk sickness spreads.",
+		levelRequirement = 1,
+		prerequisiteQuests = {},
+		repeatable = false,
+		objectives = {
+			{ id = "obj_collect_mistleaf", objectiveType = "Collect", description = "Collect Mistleaf", targetId = "item_mistleaf", required = 10 },
+		},
+	},
+
+	quest_003_goblin_menace = {
+		id = "quest_003_goblin_menace",
+		name = "Goblin Menace",
+		description = "Drive back the grave-goblins and bring proof of their retreat.",
+		levelRequirement = 5,
+		prerequisiteQuests = { "quest_001_first_steps" },
+		repeatable = false,
+		objectives = {
+			{ id = "obj_kill_goblins", objectiveType = "Kill", description = "Defeat Grave Goblins", targetId = "mob_grave_goblin", required = 10 },
+			{ id = "obj_collect_goblin_charms", objectiveType = "Collect", description = "Collect Goblin Bone Charms", targetId = "item_goblin_bone_charm", required = 5 },
+		},
+	},
+
+	quest_004_dungeon_scout = {
+		id = "quest_004_dungeon_scout",
+		name = "Dungeon Scout",
+		description = "Find the sealed crypt entrance and report its location to the expedition camp.",
+		levelRequirement = 8,
+		prerequisiteQuests = { "quest_003_goblin_menace" },
+		repeatable = false,
+		objectives = {
+			{ id = "obj_explore_crypt_gate", objectiveType = "Explore", description = "Discover the Sealed Crypt Gate", targetId = "zone_sealed_crypt_gate", required = 1 },
+		},
+	},
+
+	quest_005_daily_hunt = {
+		id = "quest_005_daily_hunt",
+		name = "Daily Hunt: Restless Bones",
+		description = "Thin the restless undead wandering beyond the safe road.",
+		levelRequirement = 10,
+		prerequisiteQuests = {},
+		repeatable = true,
+		objectives = {
+			{ id = "obj_kill_skeletons", objectiveType = "Kill", description = "Defeat Restless Skeletons", targetId = "mob_restless_skeleton", required = 15 },
+		},
+	},
+}
+
+return QuestsConfig
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">3eaec27875c6401d99478595f9ee71ce</UniqueId>
+					</Properties>
+				</Item>
+
 		</Item>
+
+			<Item class="Folder" referent="RBXB79FC56241904A1786560ACE6167794B">
+				<Properties>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+					<string name="Name">Remotes</string>
+					<int64 name="SourceAssetId">-1</int64>
+					<BinaryString name="Tags"></BinaryString>
+					<UniqueId name="UniqueId">d33997d57e774b21a72477ea2e9b3e0b</UniqueId>
+				</Properties>
+
+				<Item class="ModuleScript" referent="RBX81169D3EB3D44EF4A59098A86D4DC401">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">QuestRemotes</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Shared helper for GhostyRPG quest remotes.
+-- Server creates the instances; clients wait for them.
+
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local EVENT_NAMES: { [string]: string } = {
+	AcceptQuest = "Quest_AcceptQuest",
+	AbandonQuest = "Quest_AbandonQuest",
+	TurnInQuest = "Quest_TurnInQuest",
+	QuestAccepted = "Quest_QuestAccepted",
+	QuestAbandoned = "Quest_QuestAbandoned",
+	QuestProgressUpdated = "Quest_QuestProgressUpdated",
+	QuestReadyToTurnIn = "Quest_QuestReadyToTurnIn",
+	QuestTurnedIn = "Quest_QuestTurnedIn",
+	QuestFailed = "Quest_QuestFailed",
+}
+
+local FUNCTION_NAMES: { [string]: string } = {
+	GetAvailableQuests = "Quest_GetAvailableQuests",
+	GetActiveQuests = "Quest_GetActiveQuests",
+}
+
+local function waitOrCreate(parent: Instance, className: string, name: string): Instance
+	if RunService:IsServer() then
+		local existing = parent:FindFirstChild(name)
+		if existing then
+			return existing
+		end
+
+		local inst = Instance.new(className)
+		inst.Name = name
+		inst.Parent = parent
+		return inst
+	end
+
+	return parent:WaitForChild(name, 15)
+end
+
+local function getQuestFolder(): Folder
+	local shared = ReplicatedStorage:WaitForChild("Shared", 10)
+	assert(shared, "QuestRemotes: ReplicatedStorage.Shared was not found")
+
+	local remotes = waitOrCreate(shared, "Folder", "Remotes")
+	local quest = waitOrCreate(remotes, "Folder", "Quest")
+	return quest :: Folder
+end
+
+local folder: Folder = getQuestFolder()
+
+if RunService:IsServer() then
+	for _, name in pairs(EVENT_NAMES) do
+		waitOrCreate(folder, "RemoteEvent", name)
+	end
+	for _, name in pairs(FUNCTION_NAMES) do
+		waitOrCreate(folder, "RemoteFunction", name)
+	end
+end
+
+local QuestRemotes = {}
+QuestRemotes.EventNames = EVENT_NAMES
+QuestRemotes.FunctionNames = FUNCTION_NAMES
+
+function QuestRemotes.GetEvent(key: string): RemoteEvent
+	local name = EVENT_NAMES[key]
+	assert(name, string.format("QuestRemotes.GetEvent: unknown key '%s'", key))
+
+	local inst = folder:WaitForChild(name, 15)
+	assert(inst and inst:IsA("RemoteEvent"), string.format("QuestRemotes.GetEvent: expected RemoteEvent '%s'", name))
+	return inst :: RemoteEvent
+end
+
+function QuestRemotes.GetFunction(key: string): RemoteFunction
+	local name = FUNCTION_NAMES[key]
+	assert(name, string.format("QuestRemotes.GetFunction: unknown key '%s'", key))
+
+	local inst = folder:WaitForChild(name, 15)
+	assert(inst and inst:IsA("RemoteFunction"), string.format("QuestRemotes.GetFunction: expected RemoteFunction '%s'", name))
+	return inst :: RemoteFunction
+end
+
+return QuestRemotes
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">704057cc4f9f4949bf04681a4ee219b7</UniqueId>
+					</Properties>
+				</Item>
+			</Item>
 		</Item>
 	</Item>
 	<Item class="ServerScriptService" referent="RBX926D5265E3064731B038BEBB7A3D2A0F">
@@ -1883,7 +2100,680 @@ print(string.format("[GhostyRPG] Config smoke test loaded %d modules.", #sharedM
 						<UniqueId name="UniqueId">d738e87cebc64b16a016c7b34349626b</UniqueId>
 					</Properties>
 				</Item>
+
+				<Item class="ModuleScript" referent="RBXA5A0C6FA181E49818419081B2A0D7411">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">QuestsServerConfig</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Server-only quest rewards and limits. Never replicate this module to clients.
+
+export type ItemRewardDef = {
+	itemId: string,
+	amount: number,
+	chance: number,
+}
+
+export type QuestRewardDef = {
+	exp: number,
+	gold: number,
+	items: { ItemRewardDef },
+}
+
+local QuestsServerConfig = {}
+
+QuestsServerConfig.MaxActiveQuests = 20
+QuestsServerConfig.RepeatableCooldownSeconds = 86400
+
+QuestsServerConfig.Rewards = {
+	quest_001_first_steps = {
+		exp = 150,
+		gold = 25,
+		items = { { itemId = "item_health_potion", amount = 2, chance = 1.0 } },
+	},
+
+	quest_002_mistleaf_aid = {
+		exp = 120,
+		gold = 30,
+		items = {
+			{ itemId = "item_mana_potion", amount = 2, chance = 0.8 },
+			{ itemId = "item_mistleaf", amount = 3, chance = 1.0 },
+		},
+	},
+
+	quest_003_goblin_menace = {
+		exp = 600,
+		gold = 120,
+		items = {
+			{ itemId = "item_goblin_dagger", amount = 1, chance = 0.35 },
+			{ itemId = "item_health_potion", amount = 3, chance = 1.0 },
+		},
+	},
+
+	quest_004_dungeon_scout = {
+		exp = 900,
+		gold = 200,
+		items = {
+			{ itemId = "item_crypt_key", amount = 1, chance = 1.0 },
+			{ itemId = "item_iron_guard_vest", amount = 1, chance = 0.2 },
+		},
+	},
+
+	quest_005_daily_hunt = {
+		exp = 300,
+		gold = 75,
+		items = {
+			{ itemId = "item_bone_fragment", amount = 5, chance = 1.0 },
+			{ itemId = "item_health_potion", amount = 1, chance = 0.5 },
+		},
+	},
+}
+
+return QuestsServerConfig
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">2eb7e237544b4cb0ba79d30702181790</UniqueId>
+					</Properties>
+				</Item>
 		</Item>
+
+			<Item class="Folder" referent="RBX9DAB0C0D2D1A44EB8457F0C6C1D04427">
+				<Properties>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+					<string name="Name">Validators</string>
+					<int64 name="SourceAssetId">-1</int64>
+					<BinaryString name="Tags"></BinaryString>
+					<UniqueId name="UniqueId">f1702e2cb6e94ab796b947ceff5bd34f</UniqueId>
+				</Properties>
+
+				<Item class="ModuleScript" referent="RBX72D39CBDC68141C6A8A5FCDE6D33E961">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">QuestValidator</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Pure quest validation functions. This module does not mutate player state.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local QuestsConfig = require(
+	ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"):WaitForChild("QuestsConfig")
+)
+
+local QuestValidator = {}
+
+export type ValidationResult = {
+	success: boolean,
+	reason: string?,
+}
+
+local function ok(): ValidationResult
+	return { success = true, reason = nil }
+end
+
+local function fail(reason: string): ValidationResult
+	return { success = false, reason = reason }
+end
+
+local function countMap(values: { [string]: any }): number
+	local count = 0
+	for _ in pairs(values) do
+		count += 1
+	end
+	return count
+end
+
+function QuestValidator.CanAccept(
+	questId: string,
+	playerLevel: number,
+	activeQuests: { [string]: any },
+	completedQuests: { [string]: number },
+	maxActive: number,
+	now: number,
+	repeatCooldown: number
+): ValidationResult
+	local def = QuestsConfig.Quests[questId]
+	if not def then
+		return fail("Quest does not exist.")
+	end
+
+	if activeQuests[questId] then
+		return fail("Quest is already active.")
+	end
+
+	local completedAt = completedQuests[questId]
+	if completedAt then
+		if not def.repeatable then
+			return fail("Quest has already been completed.")
+		end
+
+		local elapsed = now - completedAt
+		if elapsed < repeatCooldown then
+			local remaining = repeatCooldown - elapsed
+			local hours = math.floor(remaining / 3600)
+			local minutes = math.floor((remaining % 3600) / 60)
+			return fail(string.format("Repeatable quest is available in %dh %dm.", hours, minutes))
+		end
+	end
+
+	if playerLevel < def.levelRequirement then
+		return fail(string.format("Requires level %d.", def.levelRequirement))
+	end
+
+	for _, prereqId in ipairs(def.prerequisiteQuests) do
+		if not completedQuests[prereqId] then
+			local prereqDef = QuestsConfig.Quests[prereqId]
+			local prereqName = if prereqDef then prereqDef.name else prereqId
+			return fail(string.format("Complete '%s' first.", prereqName))
+		end
+	end
+
+	if countMap(activeQuests) >= maxActive then
+		return fail(string.format("Active quest limit reached (%d).", maxActive))
+	end
+
+	return ok()
+end
+
+function QuestValidator.CanTurnIn(questId: string, activeQuests: { [string]: any }): ValidationResult
+	local def = QuestsConfig.Quests[questId]
+	if not def then
+		return fail("Quest does not exist.")
+	end
+
+	local active = activeQuests[questId]
+	if not active then
+		return fail("Quest is not active.")
+	end
+
+	for _, objDef in ipairs(def.objectives) do
+		local progress = active.objectives[objDef.id]
+		if not progress then
+			return fail(string.format("Missing progress for objective '%s'.", objDef.description))
+		end
+		if progress.current < objDef.required then
+			return fail(string.format("Objective incomplete: %s (%d/%d).", objDef.description, progress.current, objDef.required))
+		end
+	end
+
+	return ok()
+end
+
+function QuestValidator.CanAbandon(questId: string, activeQuests: { [string]: any }): ValidationResult
+	if not QuestsConfig.Quests[questId] then
+		return fail("Quest does not exist.")
+	end
+	if not activeQuests[questId] then
+		return fail("Quest is not active.")
+	end
+	return ok()
+end
+
+return QuestValidator
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">f076c9438dbb4452b9ef4f42fd1a0e53</UniqueId>
+					</Properties>
+				</Item>
+			</Item>
+			<Item class="Folder" referent="RBX1EC99083147E424890DB20CC53F1C3EF">
+				<Properties>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+					<string name="Name">Services</string>
+					<int64 name="SourceAssetId">-1</int64>
+					<BinaryString name="Tags"></BinaryString>
+					<UniqueId name="UniqueId">fa17731b3f9144218035985e64ad9fb8</UniqueId>
+				</Properties>
+
+				<Item class="ModuleScript" referent="RBX9E86B1116C474E2B8ED99C144C5311C2">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">QuestService</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Server-authoritative quest service for GhostyRPG.
+-- Call QuestService.Init(dataService) once a real DataService exists.
+-- Required DataService interface:
+--   dataService:GetData(player: Player) -> table?
+--   dataService:ScheduleSave(player: Player) -> nil
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Server = ServerScriptService:WaitForChild("Server")
+
+local QuestsConfig = require(Shared:WaitForChild("Config"):WaitForChild("QuestsConfig"))
+local QuestRemotes = require(Shared:WaitForChild("Remotes"):WaitForChild("QuestRemotes"))
+local QuestsServerConfig = require(Server:WaitForChild("Config"):WaitForChild("QuestsServerConfig"))
+local QuestValidator = require(Server:WaitForChild("Validators"):WaitForChild("QuestValidator"))
+
+local questTurnedInBindable = Instance.new("BindableEvent")
+
+local QuestService = {}
+QuestService.QuestTurnedInSignal = questTurnedInBindable.Event
+
+local dataService: any = nil
+local initialized = false
+local savePending: { [Player]: boolean } = {}
+
+local function getData(player: Player): { [string]: any }?
+	assert(dataService, "QuestService requires Init(dataService) before use.")
+	return dataService:GetData(player)
+end
+
+local function scheduleSave(player: Player)
+	if savePending[player] then
+		return
+	end
+
+	savePending[player] = true
+	task.delay(5, function()
+		savePending[player] = nil
+		if player.Parent and dataService then
+			dataService:ScheduleSave(player)
+		end
+	end)
+end
+
+local function getActiveQuests(data: { [string]: any }): { [string]: any }
+	if not data.ActiveQuests then
+		data.ActiveQuests = {}
+	end
+	return data.ActiveQuests
+end
+
+local function getCompletedQuests(data: { [string]: any }): { [string]: number }
+	if not data.CompletedQuests then
+		data.CompletedQuests = {}
+	end
+	return data.CompletedQuests
+end
+
+local function buildQuestEntry(questId: string): { [string]: any }
+	local def = QuestsConfig.Quests[questId]
+	assert(def, string.format("Quest definition '%s' was not found.", questId))
+
+	local objectives: { [string]: { current: number, required: number } } = {}
+	for _, objDef in ipairs(def.objectives) do
+		objectives[objDef.id] = { current = 0, required = objDef.required }
+	end
+
+	return {
+		questId = questId,
+		startedAt = os.time(),
+		objectives = objectives,
+	}
+end
+
+local function isAllObjectivesComplete(questId: string, activeEntry: { [string]: any }): boolean
+	local def = QuestsConfig.Quests[questId]
+	if not def then
+		return false
+	end
+
+	for _, objDef in ipairs(def.objectives) do
+		local progress = activeEntry.objectives[objDef.id]
+		if not progress or progress.current < objDef.required then
+			return false
+		end
+	end
+
+	return true
+end
+
+local function addInventoryItem(data: { [string]: any }, itemId: string, amount: number)
+	data.Inventory = data.Inventory or {}
+	local inventory = data.Inventory
+	local entry = inventory[itemId]
+
+	if entry then
+		entry.amount = (entry.amount or 0) + amount
+	else
+		inventory[itemId] = { itemId = itemId, amount = amount }
+	end
+end
+
+local function distributeRewards(player: Player, questId: string, data: { [string]: any }): { [string]: any }
+	local reward = QuestsServerConfig.Rewards[questId]
+	if not reward then
+		warn(string.format("[QuestService] Missing rewards for quest '%s'.", questId))
+		return { exp = 0, gold = 0, items = {} }
+	end
+
+	data.Exp = (data.Exp or 0) + reward.exp
+	data.Gold = (data.Gold or 0) + reward.gold
+
+	local rolledItems = {}
+	for _, itemReward in ipairs(reward.items) do
+		if math.random() <= itemReward.chance then
+			addInventoryItem(data, itemReward.itemId, itemReward.amount)
+			table.insert(rolledItems, { itemId = itemReward.itemId, amount = itemReward.amount })
+		end
+	end
+
+	local granted = { exp = reward.exp, gold = reward.gold, items = rolledItems }
+	questTurnedInBindable:Fire(player, questId, granted)
+	return granted
+end
+
+function QuestService.AcceptQuest(player: Player, questId: string): (boolean, string?)
+	if typeof(questId) ~= "string" or #questId == 0 then
+		return false, "Invalid quest id."
+	end
+
+	local data = getData(player)
+	if not data then
+		return false, "Player data is unavailable."
+	end
+
+	local active = getActiveQuests(data)
+	local completed = getCompletedQuests(data)
+	local level = data.Level or 1
+
+	local validation = QuestValidator.CanAccept(questId, level, active, completed, QuestsServerConfig.MaxActiveQuests, os.time(), QuestsServerConfig.RepeatableCooldownSeconds)
+	if not validation.success then
+		return false, validation.reason
+	end
+
+	active[questId] = buildQuestEntry(questId)
+	scheduleSave(player)
+
+	local def = QuestsConfig.Quests[questId]
+	QuestRemotes.GetEvent("QuestAccepted"):FireClient(player, {
+		questId = questId,
+		name = def.name,
+		objectives = active[questId].objectives,
+	})
+
+	return true, nil
+end
+
+function QuestService.AbandonQuest(player: Player, questId: string): (boolean, string?)
+	if typeof(questId) ~= "string" or #questId == 0 then
+		return false, "Invalid quest id."
+	end
+
+	local data = getData(player)
+	if not data then
+		return false, "Player data is unavailable."
+	end
+
+	local active = getActiveQuests(data)
+	local validation = QuestValidator.CanAbandon(questId, active)
+	if not validation.success then
+		return false, validation.reason
+	end
+
+	active[questId] = nil
+	scheduleSave(player)
+	QuestRemotes.GetEvent("QuestAbandoned"):FireClient(player, { questId = questId })
+
+	return true, nil
+end
+
+function QuestService.TurnInQuest(player: Player, questId: string): (boolean, string?)
+	if typeof(questId) ~= "string" or #questId == 0 then
+		return false, "Invalid quest id."
+	end
+
+	local data = getData(player)
+	if not data then
+		return false, "Player data is unavailable."
+	end
+
+	local active = getActiveQuests(data)
+	local completed = getCompletedQuests(data)
+	local validation = QuestValidator.CanTurnIn(questId, active)
+	if not validation.success then
+		return false, validation.reason
+	end
+
+	local granted = distributeRewards(player, questId, data)
+	active[questId] = nil
+	completed[questId] = os.time()
+	scheduleSave(player)
+
+	QuestRemotes.GetEvent("QuestTurnedIn"):FireClient(player, { questId = questId, rewards = granted })
+	return true, nil
+end
+
+function QuestService.NotifyKill(player: Player, mobId: string)
+	QuestService.UpdateProgress(player, "Kill", mobId, 1)
+end
+
+function QuestService.NotifyCollect(player: Player, itemId: string, amount: number?)
+	QuestService.UpdateProgress(player, "Collect", itemId, amount or 1)
+end
+
+function QuestService.NotifyTalk(player: Player, npcId: string)
+	QuestService.UpdateProgress(player, "Talk", npcId, 1)
+end
+
+function QuestService.NotifyExplore(player: Player, zoneId: string)
+	QuestService.UpdateProgress(player, "Explore", zoneId, 1)
+end
+
+function QuestService.NotifyCraft(player: Player, itemId: string, amount: number?)
+	QuestService.UpdateProgress(player, "Craft", itemId, amount or 1)
+end
+
+function QuestService.UpdateProgress(player: Player, objectiveType: string, targetId: string, amount: number)
+	if amount <= 0 then
+		return
+	end
+
+	local data = getData(player)
+	if not data then
+		return
+	end
+
+	local active = getActiveQuests(data)
+	local anyUpdated = false
+	local readyToTurnIn = {}
+
+	for questId, entry in pairs(active) do
+		local def = QuestsConfig.Quests[questId]
+		if def then
+			local questUpdated = false
+			for _, objDef in ipairs(def.objectives) do
+				if objDef.objectiveType == objectiveType and objDef.targetId == targetId then
+					local progress = entry.objectives[objDef.id]
+					if progress and progress.current < objDef.required then
+						progress.current = math.min(progress.current + amount, objDef.required)
+						questUpdated = true
+						anyUpdated = true
+					end
+				end
+			end
+
+			if questUpdated then
+				QuestRemotes.GetEvent("QuestProgressUpdated"):FireClient(player, { questId = questId, objectives = entry.objectives })
+				if isAllObjectivesComplete(questId, entry) then
+					table.insert(readyToTurnIn, questId)
+				end
+			end
+		end
+	end
+
+	if not anyUpdated then
+		return
+	end
+
+	scheduleSave(player)
+	for _, questId in ipairs(readyToTurnIn) do
+		QuestRemotes.GetEvent("QuestReadyToTurnIn"):FireClient(player, { questId = questId })
+	end
+end
+
+local function getAvailableQuests(player: Player): { any }
+	local data = getData(player)
+	if not data then
+		return {}
+	end
+
+	local active = getActiveQuests(data)
+	local completed = getCompletedQuests(data)
+	local level = data.Level or 1
+	local result = {}
+
+	for questId, def in pairs(QuestsConfig.Quests) do
+		local validation = QuestValidator.CanAccept(questId, level, active, completed, QuestsServerConfig.MaxActiveQuests, os.time(), QuestsServerConfig.RepeatableCooldownSeconds)
+		if validation.success then
+			table.insert(result, {
+				id = def.id,
+				name = def.name,
+				description = def.description,
+				levelRequirement = def.levelRequirement,
+				repeatable = def.repeatable,
+				objectives = def.objectives,
+			})
+		end
+	end
+
+	return result
+end
+
+local function getActiveQuestList(player: Player): { any }
+	local data = getData(player)
+	if not data then
+		return {}
+	end
+
+	local active = getActiveQuests(data)
+	local result = {}
+
+	for questId, entry in pairs(active) do
+		local def = QuestsConfig.Quests[questId]
+		if def then
+			table.insert(result, {
+				id = questId,
+				name = def.name,
+				description = def.description,
+				objectives = def.objectives,
+				progress = entry.objectives,
+				startedAt = entry.startedAt,
+				isComplete = isAllObjectivesComplete(questId, entry),
+			})
+		end
+	end
+
+	return result
+end
+
+function QuestService.Init(newDataService: any)
+	assert(newDataService, "QuestService.Init requires a DataService.")
+	assert(newDataService.GetData, "QuestService.Init requires dataService:GetData(player).")
+	assert(newDataService.ScheduleSave, "QuestService.Init requires dataService:ScheduleSave(player).")
+
+	if initialized then
+		warn("[QuestService] Init called more than once; ignoring duplicate call.")
+		return
+	end
+
+	dataService = newDataService
+	initialized = true
+
+	QuestRemotes.GetEvent("AcceptQuest").OnServerEvent:Connect(function(player: Player, questId: any)
+		if typeof(questId) ~= "string" then
+			return
+		end
+		local success, reason = QuestService.AcceptQuest(player, questId)
+		if not success then
+			warn(string.format("[QuestService] AcceptQuest rejected for %s: %s", player.Name, tostring(reason)))
+		end
+	end)
+
+	QuestRemotes.GetEvent("AbandonQuest").OnServerEvent:Connect(function(player: Player, questId: any)
+		if typeof(questId) ~= "string" then
+			return
+		end
+		local success, reason = QuestService.AbandonQuest(player, questId)
+		if not success then
+			warn(string.format("[QuestService] AbandonQuest rejected for %s: %s", player.Name, tostring(reason)))
+		end
+	end)
+
+	QuestRemotes.GetEvent("TurnInQuest").OnServerEvent:Connect(function(player: Player, questId: any)
+		if typeof(questId) ~= "string" then
+			return
+		end
+		local success, reason = QuestService.TurnInQuest(player, questId)
+		if not success then
+			warn(string.format("[QuestService] TurnInQuest rejected for %s: %s", player.Name, tostring(reason)))
+		end
+	end)
+
+	QuestRemotes.GetFunction("GetAvailableQuests").OnServerInvoke = getAvailableQuests
+	QuestRemotes.GetFunction("GetActiveQuests").OnServerInvoke = getActiveQuestList
+
+	Players.PlayerRemoving:Connect(function(player: Player)
+		savePending[player] = nil
+	end)
+
+	print("[QuestService] Initialized.")
+end
+
+return QuestService
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">ef896e3617d84e619cf0591bc51718d2</UniqueId>
+					</Properties>
+				</Item>
+			</Item>
+			<Item class="Script" referent="RBXDE5EC164C1F244C3B1632F260C99FC90">
+				<Properties>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+					<string name="Name">GhostyRPG_QuestSmokeTest</string>
+					<ProtectedString name="Source"><![CDATA[--!strict
+-- Server smoke test for GhostyRPG quest modules. This does not initialize QuestService.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local shared = ReplicatedStorage:WaitForChild("Shared")
+local server = ServerScriptService:WaitForChild("Server")
+
+local questModules = {
+	shared:WaitForChild("Config"):WaitForChild("QuestsConfig"),
+	shared:WaitForChild("Remotes"):WaitForChild("QuestRemotes"),
+	server:WaitForChild("Config"):WaitForChild("QuestsServerConfig"),
+	server:WaitForChild("Validators"):WaitForChild("QuestValidator"),
+	server:WaitForChild("Services"):WaitForChild("QuestService"),
+}
+
+for _, moduleScript in ipairs(questModules) do
+	local ok, result = pcall(require, moduleScript)
+	assert(ok, string.format("Failed to load %s: %s", moduleScript:GetFullName(), tostring(result)))
+end
+
+print(string.format("[GhostyRPG] Quest smoke test loaded %d modules.", #questModules))
+]]></ProtectedString>
+					<int64 name="SourceAssetId">-1</int64>
+					<BinaryString name="Tags"></BinaryString>
+					<UniqueId name="UniqueId">42e79ea8b7f74b2089b5452c5645ca5d</UniqueId>
+				</Properties>
+			</Item>
 		</Item>
 	</Item>
 	<Item class="ServerStorage" referent="RBXD4EEA275775E413D931C3316D9D6F428">
