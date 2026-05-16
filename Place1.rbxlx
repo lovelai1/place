@@ -2118,7 +2118,7 @@ return ItemConfig
 						<string name="Name">QuestRemotes</string>
 						<ProtectedString name="Source"><![CDATA[--!strict
 -- Shared helper for GhostyRPG quest remotes.
--- Server creates the instances; clients wait for them.
+-- Server creation is explicit/idempotent through Ensure(); clients only wait.
 
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -2140,50 +2140,79 @@ local FUNCTION_NAMES: { [string]: string } = {
 	GetActiveQuests = "Quest_GetActiveQuests",
 }
 
-local function waitOrCreate(parent: Instance, className: string, name: string): Instance
-	if RunService:IsServer() then
-		local existing = parent:FindFirstChild(name)
-		if existing then
-			return existing
-		end
-
-		local inst = Instance.new(className)
-		inst.Name = name
-		inst.Parent = parent
-		return inst
-	end
-
-	return parent:WaitForChild(name, 15)
-end
-
-local function getQuestFolder(): Folder
-	local shared = ReplicatedStorage:WaitForChild("Shared", 10)
-	assert(shared, "QuestRemotes: ReplicatedStorage.Shared was not found")
-
-	local remotes = waitOrCreate(shared, "Folder", "Remotes")
-	local quest = waitOrCreate(remotes, "Folder", "Quest")
-	return quest :: Folder
-end
-
-local folder: Folder = getQuestFolder()
-
-if RunService:IsServer() then
-	for _, name in pairs(EVENT_NAMES) do
-		waitOrCreate(folder, "RemoteEvent", name)
-	end
-	for _, name in pairs(FUNCTION_NAMES) do
-		waitOrCreate(folder, "RemoteFunction", name)
-	end
-end
-
 local QuestRemotes = {}
 QuestRemotes.EventNames = EVENT_NAMES
 QuestRemotes.FunctionNames = FUNCTION_NAMES
+
+local function getSharedFolder(): Folder
+	local shared = ReplicatedStorage:WaitForChild("Shared", 10)
+	assert(shared and shared:IsA("Folder"), "QuestRemotes: ReplicatedStorage.Shared was not found")
+	return shared :: Folder
+end
+
+local function getOrCreateFolder(parent: Instance, name: string): Folder
+	local existing = parent:FindFirstChild(name)
+	if existing then
+		assert(existing:IsA("Folder"), string.format("QuestRemotes: %s exists but is %s", name, existing.ClassName))
+		return existing :: Folder
+	end
+
+	assert(RunService:IsServer(), string.format("QuestRemotes: client cannot create folder %s", name))
+	local folder = Instance.new("Folder")
+	folder.Name = name
+	folder.Parent = parent
+	return folder
+end
+
+local function waitForFolder(parent: Instance, name: string): Folder
+	local folder = parent:WaitForChild(name, 15)
+	assert(folder and folder:IsA("Folder"), string.format("QuestRemotes: expected Folder %s", name))
+	return folder :: Folder
+end
+
+local function getQuestFolder(createOnServer: boolean): Folder
+	local shared = getSharedFolder()
+	if RunService:IsServer() and createOnServer then
+		local remotes = getOrCreateFolder(shared, "Remotes")
+		return getOrCreateFolder(remotes, "Quest")
+	end
+
+	local remotes = waitForFolder(shared, "Remotes")
+	return waitForFolder(remotes, "Quest")
+end
+
+local function getOrCreateRemote(parent: Instance, className: string, name: string): Instance
+	local existing = parent:FindFirstChild(name)
+	if existing then
+		assert(existing.ClassName == className, string.format("QuestRemotes: %s exists but is %s", name, existing.ClassName))
+		return existing
+	end
+
+	assert(RunService:IsServer(), string.format("QuestRemotes: client cannot create remote %s", name))
+	local remote = Instance.new(className)
+	remote.Name = name
+	remote.Parent = parent
+	return remote
+end
+
+function QuestRemotes.Ensure(): Folder
+	local folder = getQuestFolder(RunService:IsServer())
+	if RunService:IsServer() then
+		for _, remoteName in pairs(EVENT_NAMES) do
+			getOrCreateRemote(folder, "RemoteEvent", remoteName)
+		end
+		for _, remoteName in pairs(FUNCTION_NAMES) do
+			getOrCreateRemote(folder, "RemoteFunction", remoteName)
+		end
+	end
+	return folder
+end
 
 function QuestRemotes.GetEvent(key: string): RemoteEvent
 	local name = EVENT_NAMES[key]
 	assert(name, string.format("QuestRemotes.GetEvent: unknown key '%s'", key))
 
+	local folder = if RunService:IsServer() then QuestRemotes.Ensure() else getQuestFolder(false)
 	local inst = folder:WaitForChild(name, 15)
 	assert(inst and inst:IsA("RemoteEvent"), string.format("QuestRemotes.GetEvent: expected RemoteEvent '%s'", name))
 	return inst :: RemoteEvent
@@ -2193,6 +2222,7 @@ function QuestRemotes.GetFunction(key: string): RemoteFunction
 	local name = FUNCTION_NAMES[key]
 	assert(name, string.format("QuestRemotes.GetFunction: unknown key '%s'", key))
 
+	local folder = if RunService:IsServer() then QuestRemotes.Ensure() else getQuestFolder(false)
 	local inst = folder:WaitForChild(name, 15)
 	assert(inst and inst:IsA("RemoteFunction"), string.format("QuestRemotes.GetFunction: expected RemoteFunction '%s'", name))
 	return inst :: RemoteFunction
@@ -2888,10 +2918,10 @@ return ClassValidator
 						<string name="Name">QuestService</string>
 						<ProtectedString name="Source"><![CDATA[--!strict
 -- Server-authoritative quest service for GhostyRPG.
--- Call QuestService.Init(dataService) once a real DataService exists.
--- Required DataService interface:
---   dataService:GetData(player: Player) -> table?
---   dataService:ScheduleSave(player: Player) -> nil
+-- Call QuestService.Init(playerDataService, inventoryService?) once dependencies exist.
+-- Required PlayerDataService interface:
+--   GetData(player: Player) -> table?
+--   ScheduleSave(player: Player) -> nil
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -3238,6 +3268,7 @@ function QuestService.Init(newDataService: any, newInventoryService: any?)
 	dataService = newDataService
 	inventoryService = newInventoryService
 	initialized = true
+	QuestRemotes.Ensure()
 
 	QuestRemotes.GetEvent("AcceptQuest").OnServerEvent:Connect(function(player: Player, questId: any)
 		if typeof(questId) ~= "string" then
@@ -4060,7 +4091,7 @@ end
 local playerDataConfig = require(Shared:WaitForChild("Config"):WaitForChild("PlayerDataConfig") :: ModuleScript)
 local itemConfig = require(Shared:WaitForChild("Config"):WaitForChild("ItemConfig") :: ModuleScript)
 require(Shared:WaitForChild("Config"):WaitForChild("QuestsConfig") :: ModuleScript)
-require(Shared:WaitForChild("Remotes"):WaitForChild("QuestRemotes") :: ModuleScript)
+local questRemotes = require(Shared:WaitForChild("Remotes"):WaitForChild("QuestRemotes") :: ModuleScript)
 require(Server:WaitForChild("Config"):WaitForChild("QuestsServerConfig") :: ModuleScript)
 require(Server:WaitForChild("Validators"):WaitForChild("QuestValidator") :: ModuleScript)
 require(Server:WaitForChild("Validators"):WaitForChild("InventoryValidator") :: ModuleScript)
@@ -4070,6 +4101,10 @@ local inventoryService = require(Server:WaitForChild("Services"):WaitForChild("I
 local statsService = require(Server:WaitForChild("Services"):WaitForChild("StatsService") :: ModuleScript)
 local classService = require(Server:WaitForChild("Services"):WaitForChild("ClassService") :: ModuleScript)
 require(Server:WaitForChild("Services"):WaitForChild("QuestService") :: ModuleScript)
+
+record("QuestRemotes.Ensure", type(questRemotes.Ensure) == "function")
+record("QuestRemotes.GetEvent", type(questRemotes.GetEvent) == "function")
+record("QuestRemotes.GetFunction", type(questRemotes.GetFunction) == "function")
 
 for _, methodName in ipairs({ "Init", "LoadPlayer", "SavePlayer", "ScheduleSave", "GetData", "UpdateData", "IsLoaded", "ReleasePlayer" }) do
 	record(string.format("PlayerDataService.%s", methodName), type(playerDataService[methodName]) == "function")
