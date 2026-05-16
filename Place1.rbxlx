@@ -1662,6 +1662,133 @@ return RoleConfig
 					</Properties>
 				</Item>
 
+				<Item class="ModuleScript" referent="RBXCF496967C66F4429948BAD37F1AAD0F2">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">AbilityConfig</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Public ability definitions for GhostyRPG.
+-- Pure replicated data only: no combat execution, no UI, no side effects.
+
+local AbilityConfig = {}
+
+export type AbilityDefinition = {
+	id: string,
+	name: string,
+	description: string,
+	className: string?,
+	allowedRoles: { string },
+	requiredLevel: number,
+	resourceType: string?,
+	resourceCost: number,
+	cooldown: number,
+	globalCooldown: number,
+	range: number,
+	targetType: string,
+	effectType: string,
+	power: number,
+	threatModifier: number,
+	tags: { string },
+}
+
+local Abilities: { [string]: AbilityDefinition } = {
+	-- Warrior | Rage | Tank/DPS
+	WARRIOR_TAUNT = { id = "WARRIOR_TAUNT", name = "Taunt", description = "Force a single enemy to attack you for 3 seconds. Does not deal damage.", className = "Warrior", allowedRoles = { "Tank" }, requiredLevel = 1, resourceType = "Rage", resourceCost = 0, cooldown = 8, globalCooldown = 0, range = 12, targetType = "Enemy", effectType = "Taunt", power = 0, threatModifier = 3.5, tags = { "Taunt", "Utility", "OffGCD" } },
+	WARRIOR_SHIELD_SLAM = { id = "WARRIOR_SHIELD_SLAM", name = "Shield Slam", description = "Slam your shield into the enemy, dealing physical damage and generating high threat.", className = "Warrior", allowedRoles = { "Tank" }, requiredLevel = 1, resourceType = "Rage", resourceCost = 20, cooldown = 6, globalCooldown = 1.5, range = 5, targetType = "Enemy", effectType = "Damage", power = 1.2, threatModifier = 2.5, tags = { "Physical", "Melee", "Shield" } },
+	WARRIOR_DEFENSIVE_STANCE = { id = "WARRIOR_DEFENSIVE_STANCE", name = "Defensive Stance", description = "Enter a protective stance, reducing incoming damage by 20% and boosting threat generation.", className = "Warrior", allowedRoles = { "Tank" }, requiredLevel = 2, resourceType = "Rage", resourceCost = 0, cooldown = 20, globalCooldown = 0, range = 0, targetType = "Self", effectType = "Shield", power = 0.20, threatModifier = 1.5, tags = { "Stance", "Defensive", "Self", "OffGCD" } },
+	WARRIOR_BATTLE_SHOUT = { id = "WARRIOR_BATTLE_SHOUT", name = "Battle Shout", description = "A rallying war cry that raises the attack power of all nearby allies.", className = "Warrior", allowedRoles = { "Tank", "DPS" }, requiredLevel = 3, resourceType = "Rage", resourceCost = 10, cooldown = 30, globalCooldown = 1.5, range = 20, targetType = "AreaAlly", effectType = "Buff", power = 0.15, threatModifier = 1.0, tags = { "Buff", "AoE", "Physical" } },
+	WARRIOR_HEROIC_STRIKE = { id = "WARRIOR_HEROIC_STRIKE", name = "Heroic Strike", description = "A powerful overhead swing dealing heavy physical damage.", className = "Warrior", allowedRoles = { "DPS", "Tank" }, requiredLevel = 1, resourceType = "Rage", resourceCost = 15, cooldown = 0, globalCooldown = 1.5, range = 5, targetType = "Enemy", effectType = "Damage", power = 1.5, threatModifier = 1.2, tags = { "Physical", "Melee" } },
+	WARRIOR_WHIRLWIND = { id = "WARRIOR_WHIRLWIND", name = "Whirlwind", description = "Spin in a furious arc, striking all nearby enemies with your weapon.", className = "Warrior", allowedRoles = { "DPS" }, requiredLevel = 6, resourceType = "Rage", resourceCost = 25, cooldown = 10, globalCooldown = 1.5, range = 8, targetType = "AreaEnemy", effectType = "Damage", power = 1.1, threatModifier = 1.3, tags = { "Physical", "Melee", "AoE" } },
+
+	-- Paladin | Mana | Tank/Healer/DPS
+	PALADIN_HOLY_LIGHT = { id = "PALADIN_HOLY_LIGHT", name = "Holy Light", description = "Channel radiant divine energy to heal a friendly target.", className = "Paladin", allowedRoles = { "Healer" }, requiredLevel = 1, resourceType = "Mana", resourceCost = 30, cooldown = 0, globalCooldown = 1.5, range = 30, targetType = "Ally", effectType = "Heal", power = 1.4, threatModifier = 0.5, tags = { "Holy", "Heal", "Single" } },
+	PALADIN_LAY_ON_HANDS = { id = "PALADIN_LAY_ON_HANDS", name = "Lay on Hands", description = "Pour your remaining holy energy into an ally, restoring a large amount of health. Long cooldown.", className = "Paladin", allowedRoles = { "Healer", "Tank" }, requiredLevel = 8, resourceType = "Mana", resourceCost = 80, cooldown = 300, globalCooldown = 1.5, range = 20, targetType = "Ally", effectType = "Heal", power = 5.0, threatModifier = 0.3, tags = { "Holy", "Heal", "Emergency", "Cooldown" } },
+	PALADIN_DIVINE_SHIELD = { id = "PALADIN_DIVINE_SHIELD", name = "Divine Shield", description = "Surround yourself with a bubble of holy energy, absorbing significant incoming damage.", className = "Paladin", allowedRoles = { "Tank", "Healer" }, requiredLevel = 4, resourceType = "Mana", resourceCost = 25, cooldown = 60, globalCooldown = 0, range = 0, targetType = "Self", effectType = "Shield", power = 1.0, threatModifier = 0.5, tags = { "Holy", "Shield", "Defensive", "Self", "OffGCD" } },
+	PALADIN_CONSECRATION = { id = "PALADIN_CONSECRATION", name = "Consecration", description = "Consecrate the ground beneath you, dealing Holy damage to all nearby enemies and generating steady threat.", className = "Paladin", allowedRoles = { "Tank", "DPS" }, requiredLevel = 5, resourceType = "Mana", resourceCost = 40, cooldown = 12, globalCooldown = 1.5, range = 8, targetType = "AreaEnemy", effectType = "Damage", power = 0.8, threatModifier = 1.8, tags = { "Holy", "AoE", "GroundEffect" } },
+	PALADIN_HAMMER_OF_JUSTICE = { id = "PALADIN_HAMMER_OF_JUSTICE", name = "Hammer of Justice", description = "Strike an enemy with righteous force, dealing Holy damage and generating high threat.", className = "Paladin", allowedRoles = { "Tank", "DPS" }, requiredLevel = 1, resourceType = "Mana", resourceCost = 20, cooldown = 4, globalCooldown = 1.5, range = 5, targetType = "Enemy", effectType = "Damage", power = 1.1, threatModifier = 1.6, tags = { "Holy", "Melee" } },
+
+	-- Mage | Mana | DPS
+	MAGE_FIREBALL = { id = "MAGE_FIREBALL", name = "Fireball", description = "Hurl a blazing ball of fire at a distant enemy.", className = "Mage", allowedRoles = { "DPS" }, requiredLevel = 1, resourceType = "Mana", resourceCost = 25, cooldown = 0, globalCooldown = 1.5, range = 40, targetType = "Enemy", effectType = "Damage", power = 1.6, threatModifier = 1.0, tags = { "Fire", "Ranged", "Spell" } },
+	MAGE_ARCANE_BLAST = { id = "MAGE_ARCANE_BLAST", name = "Arcane Blast", description = "Unleash a focused bolt of raw arcane energy.", className = "Mage", allowedRoles = { "DPS" }, requiredLevel = 1, resourceType = "Mana", resourceCost = 20, cooldown = 0, globalCooldown = 1.5, range = 40, targetType = "Enemy", effectType = "Damage", power = 1.4, threatModifier = 1.0, tags = { "Arcane", "Ranged", "Spell" } },
+	MAGE_FROST_NOVA = { id = "MAGE_FROST_NOVA", name = "Frost Nova", description = "Burst with a shockwave of frost, dealing Frost damage to all nearby enemies.", className = "Mage", allowedRoles = { "DPS" }, requiredLevel = 3, resourceType = "Mana", resourceCost = 35, cooldown = 15, globalCooldown = 1.5, range = 10, targetType = "AreaEnemy", effectType = "Damage", power = 1.0, threatModifier = 1.2, tags = { "Frost", "AoE", "Spell" } },
+	MAGE_MANA_SHIELD = { id = "MAGE_MANA_SHIELD", name = "Mana Shield", description = "Convert Mana into a protective barrier that absorbs incoming hits.", className = "Mage", allowedRoles = { "DPS" }, requiredLevel = 5, resourceType = "Mana", resourceCost = 30, cooldown = 30, globalCooldown = 0, range = 0, targetType = "Self", effectType = "Shield", power = 0.8, threatModifier = 0.5, tags = { "Arcane", "Shield", "Defensive", "Self", "OffGCD" } },
+	MAGE_BLINK = { id = "MAGE_BLINK", name = "Blink", description = "Teleport forward in an instant, breaking movement-impairing effects.", className = "Mage", allowedRoles = { "DPS" }, requiredLevel = 6, resourceType = "Mana", resourceCost = 15, cooldown = 15, globalCooldown = 0, range = 20, targetType = "Self", effectType = "Buff", power = 0, threatModifier = 0.8, tags = { "Arcane", "Mobility", "Utility", "Self", "OffGCD" } },
+
+	-- Priest | Mana | Healer/DPS
+	PRIEST_FLASH_HEAL = { id = "PRIEST_FLASH_HEAL", name = "Flash Heal", description = "A quick but expensive heal on a single friendly target.", className = "Priest", allowedRoles = { "Healer" }, requiredLevel = 1, resourceType = "Mana", resourceCost = 25, cooldown = 0, globalCooldown = 1.5, range = 35, targetType = "Ally", effectType = "Heal", power = 1.2, threatModifier = 0.4, tags = { "Holy", "Heal", "Single", "Fast" } },
+	PRIEST_RENEW = { id = "PRIEST_RENEW", name = "Renew", description = "Suffuse the target with holy energy, healing them gradually over time.", className = "Priest", allowedRoles = { "Healer" }, requiredLevel = 3, resourceType = "Mana", resourceCost = 20, cooldown = 0, globalCooldown = 1.5, range = 35, targetType = "Ally", effectType = "Heal", power = 0.9, threatModifier = 0.3, tags = { "Holy", "Heal", "HealOverTime" } },
+	PRIEST_PRAYER_OF_HEALING = { id = "PRIEST_PRAYER_OF_HEALING", name = "Prayer of Healing", description = "A powerful group prayer that heals all nearby allies.", className = "Priest", allowedRoles = { "Healer" }, requiredLevel = 6, resourceType = "Mana", resourceCost = 55, cooldown = 10, globalCooldown = 1.5, range = 25, targetType = "AreaAlly", effectType = "Heal", power = 1.0, threatModifier = 0.6, tags = { "Holy", "Heal", "AoE" } },
+	PRIEST_POWER_WORD_SHIELD = { id = "PRIEST_POWER_WORD_SHIELD", name = "Power Word: Shield", description = "Surround an ally with a defensive shield that absorbs the next instance of damage.", className = "Priest", allowedRoles = { "Healer", "DPS" }, requiredLevel = 2, resourceType = "Mana", resourceCost = 20, cooldown = 8, globalCooldown = 1.5, range = 35, targetType = "Ally", effectType = "Shield", power = 1.1, threatModifier = 0.5, tags = { "Holy", "Shield", "Absorb" } },
+	PRIEST_SMITE = { id = "PRIEST_SMITE", name = "Smite", description = "Strike an enemy with a bolt of holy light.", className = "Priest", allowedRoles = { "DPS", "Healer" }, requiredLevel = 1, resourceType = "Mana", resourceCost = 15, cooldown = 0, globalCooldown = 1.5, range = 35, targetType = "Enemy", effectType = "Damage", power = 1.0, threatModifier = 1.0, tags = { "Holy", "Ranged", "Spell" } },
+
+	-- Rogue | Energy | DPS
+	ROGUE_SINISTER_STRIKE = { id = "ROGUE_SINISTER_STRIKE", name = "Sinister Strike", description = "A quick, vicious stab that generates a Combo Point on the target.", className = "Rogue", allowedRoles = { "DPS" }, requiredLevel = 1, resourceType = "Energy", resourceCost = 30, cooldown = 0, globalCooldown = 1.0, range = 5, targetType = "Enemy", effectType = "Damage", power = 1.1, threatModifier = 0.9, tags = { "Physical", "Melee", "ComboBuilder" } },
+	ROGUE_BACKSTAB = { id = "ROGUE_BACKSTAB", name = "Backstab", description = "Drive your blade into an unguarded back, dealing devastating damage. Positional requirement.", className = "Rogue", allowedRoles = { "DPS" }, requiredLevel = 1, resourceType = "Energy", resourceCost = 40, cooldown = 0, globalCooldown = 1.0, range = 5, targetType = "Enemy", effectType = "Damage", power = 2.0, threatModifier = 0.8, tags = { "Physical", "Melee", "Positional", "HighDamage" } },
+	ROGUE_EVISCERATE = { id = "ROGUE_EVISCERATE", name = "Eviscerate", description = "A brutal finishing move whose damage scales with active Combo Points.", className = "Rogue", allowedRoles = { "DPS" }, requiredLevel = 3, resourceType = "Energy", resourceCost = 25, cooldown = 0, globalCooldown = 1.0, range = 5, targetType = "Enemy", effectType = "Damage", power = 1.8, threatModifier = 0.9, tags = { "Physical", "Melee", "Finisher", "ComboSpender" } },
+	ROGUE_KIDNEY_SHOT = { id = "ROGUE_KIDNEY_SHOT", name = "Kidney Shot", description = "A precise strike to the kidney that deals damage and briefly stuns the target.", className = "Rogue", allowedRoles = { "DPS" }, requiredLevel = 5, resourceType = "Energy", resourceCost = 35, cooldown = 20, globalCooldown = 1.0, range = 5, targetType = "Enemy", effectType = "Damage", power = 1.2, threatModifier = 1.0, tags = { "Physical", "Melee", "Stun", "Control", "Finisher" } },
+	ROGUE_VANISH = { id = "ROGUE_VANISH", name = "Vanish", description = "Instantly enter stealth, dropping all threat. Long cooldown.", className = "Rogue", allowedRoles = { "DPS" }, requiredLevel = 4, resourceType = "Energy", resourceCost = 0, cooldown = 120, globalCooldown = 0, range = 0, targetType = "Self", effectType = "Buff", power = 0, threatModifier = 0.0, tags = { "Stealth", "Utility", "ThreatDrop", "Self", "Cooldown", "OffGCD" } },
+
+	-- Hunter | Focus | DPS
+	HUNTER_AIMED_SHOT = { id = "HUNTER_AIMED_SHOT", name = "Aimed Shot", description = "A carefully lined-up ranged shot that deals high physical damage.", className = "Hunter", allowedRoles = { "DPS" }, requiredLevel = 1, resourceType = "Focus", resourceCost = 30, cooldown = 0, globalCooldown = 1.5, range = 60, targetType = "Enemy", effectType = "Damage", power = 1.7, threatModifier = 1.0, tags = { "Physical", "Ranged", "Bow" } },
+	HUNTER_SERPENT_STING = { id = "HUNTER_SERPENT_STING", name = "Serpent Sting", description = "Coat your arrow with venom, dealing Nature damage to the target over time.", className = "Hunter", allowedRoles = { "DPS" }, requiredLevel = 1, resourceType = "Focus", resourceCost = 20, cooldown = 0, globalCooldown = 1.5, range = 50, targetType = "Enemy", effectType = "Damage", power = 0.7, threatModifier = 0.8, tags = { "Nature", "Ranged", "DamageOverTime", "Poison" } },
+	HUNTER_HUNTERS_MARK = { id = "HUNTER_HUNTERS_MARK", name = "Hunter's Mark", description = "Paint a target with a hunter's mark, increasing all damage the target takes.", className = "Hunter", allowedRoles = { "DPS" }, requiredLevel = 2, resourceType = "Focus", resourceCost = 10, cooldown = 0, globalCooldown = 1.5, range = 60, targetType = "Enemy", effectType = "Debuff", power = 0.1, threatModifier = 0.5, tags = { "Debuff", "Ranged", "Utility" } },
+	HUNTER_MULTI_SHOT = { id = "HUNTER_MULTI_SHOT", name = "Multi-Shot", description = "Loose several arrows simultaneously, striking multiple enemies in a forward arc.", className = "Hunter", allowedRoles = { "DPS" }, requiredLevel = 3, resourceType = "Focus", resourceCost = 40, cooldown = 10, globalCooldown = 1.5, range = 40, targetType = "AreaEnemy", effectType = "Damage", power = 1.0, threatModifier = 1.1, tags = { "Physical", "Ranged", "AoE", "Bow" } },
+	HUNTER_RAPID_FIRE = { id = "HUNTER_RAPID_FIRE", name = "Rapid Fire", description = "Enter a firing frenzy, temporarily increasing your ranged attack speed. Long cooldown.", className = "Hunter", allowedRoles = { "DPS" }, requiredLevel = 6, resourceType = "Focus", resourceCost = 15, cooldown = 120, globalCooldown = 0, range = 0, targetType = "Self", effectType = "Buff", power = 0.4, threatModifier = 1.0, tags = { "Physical", "Ranged", "Haste", "Buff", "Cooldown", "Self", "OffGCD" } },
+
+	-- Shared | Any class/role
+	SHARED_SECOND_WIND = { id = "SHARED_SECOND_WIND", name = "Second Wind", description = "Catch your breath, restoring a portion of your primary resource.", className = nil, allowedRoles = { "Tank", "DPS", "Healer" }, requiredLevel = 1, resourceType = nil, resourceCost = 0, cooldown = 60, globalCooldown = 0, range = 0, targetType = "Self", effectType = "ResourceGain", power = 0.15, threatModifier = 0.0, tags = { "Utility", "Self", "ResourceGain", "OffGCD" } },
+}
+
+function AbilityConfig.GetAbility(abilityId: string): AbilityDefinition?
+	return Abilities[abilityId]
+end
+
+function AbilityConfig.IsValidAbility(abilityId: string): boolean
+	return Abilities[abilityId] ~= nil
+end
+
+function AbilityConfig.GetClassAbilities(className: string): { AbilityDefinition }
+	local result = {}
+	for _, ability in pairs(Abilities) do
+		if ability.className == className then
+			table.insert(result, ability)
+		end
+	end
+	return result
+end
+
+function AbilityConfig.CanClassUseAbility(className: string, abilityId: string): boolean
+	local ability = Abilities[abilityId]
+	if not ability then
+		return false
+	end
+	return ability.className == nil or ability.className == className
+end
+
+function AbilityConfig.CanRoleUseAbility(roleName: string, abilityId: string): boolean
+	local ability = Abilities[abilityId]
+	if not ability then
+		return false
+	end
+	for _, allowedRole in ipairs(ability.allowedRoles) do
+		if allowedRole == roleName then
+			return true
+		end
+	end
+	return false
+end
+
+return AbilityConfig
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">9e8a32a7473340f69634384007610ba0</UniqueId>
+					</Properties>
+				</Item>
+
 				<Item class="ModuleScript" referent="RBX97BBF5E725EF4896B78BCAFDDDE86CD7">
 					<Properties>
 						<BinaryString name="AttributesSerialize"></BinaryString>
@@ -1871,7 +1998,7 @@ export type PlayerData = {
 	Gold: number,
 	SelectedClass: string,
 	SelectedRole: string,
-	Stats: { [string]: number },
+	Stats: { [string]: any },
 	Inventory: { [string]: InventoryItemData },
 	Equipment: EquipmentData,
 	ActiveQuests: { [string]: ActiveQuestData },
@@ -1879,6 +2006,7 @@ export type PlayerData = {
 	Professions: { [string]: ProfessionData },
 	DungeonProgress: { [string]: DungeonProgressData },
 	ArenaProfile: ArenaProfileData,
+	AbilityCooldowns: { [string]: number },
 	Settings: { [string]: any },
 }
 
@@ -1897,6 +2025,8 @@ local DEFAULT_DATA: PlayerData = {
 		Spirit = 1,
 		MaxHealth = 100,
 		MaxResource = 100,
+		Resource = 0,
+		ResourceType = "",
 		Armor = 0,
 		AttackPower = 0,
 		SpellPower = 0,
@@ -1921,6 +2051,8 @@ local DEFAULT_DATA: PlayerData = {
 		losses = 0,
 		season = 1,
 	},
+	-- CombatService owns these timestamps during a session; PlayerDataService resets them after load.
+	AbilityCooldowns = {},
 	Settings = {
 		musicVolume = 0.8,
 		sfxVolume = 1.0,
@@ -1958,6 +2090,11 @@ function PlayerDataConfig.MergeDefaults(target: { [any]: any }, defaults: { [any
 			PlayerDataConfig.MergeDefaults(target[key], defaultValue)
 		end
 	end
+	return target
+end
+
+function PlayerDataConfig.Reconcile(existing: { [any]: any }, template: { [any]: any }?): { [any]: any }
+	return PlayerDataConfig.MergeDefaults(existing, template or DEFAULT_DATA)
 end
 
 return PlayerDataConfig
@@ -2413,7 +2550,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local sharedConfig = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config")
 local serverConfig = ServerScriptService:WaitForChild("Server"):WaitForChild("Config")
 
-local sharedModules = { "GameEnums", "ClassConfig", "RoleConfig", "StatFormulas", "QuestsConfig", "PlayerDataConfig", "ItemConfig" }
+local sharedModules = { "GameEnums", "ClassConfig", "RoleConfig", "StatFormulas", "AbilityConfig", "QuestsConfig", "PlayerDataConfig", "ItemConfig" }
 local serverModules = { "ProfessionConfig", "DungeonConfig", "RaidConfig", "ArenaConfig", "QuestsServerConfig" }
 
 for _, moduleName in ipairs(sharedModules) do
@@ -2802,6 +2939,196 @@ return InventoryValidator
 						<UniqueId name="UniqueId">4e00990e310340f18b8c077f569b26a0</UniqueId>
 					</Properties>
 				</Item>
+				<Item class="ModuleScript" referent="RBXDA633EA44FCB4E73AB8607381F80ED1C">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">AbilityValidator</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Pure server-side validation for ability usage.
+-- Does not execute combat and never mutates player data or cooldown state.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local SharedConfig = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config")
+local AbilityConfig = require(SharedConfig:WaitForChild("AbilityConfig"))
+local ClassConfig = require(SharedConfig:WaitForChild("ClassConfig"))
+local RoleConfig = require(SharedConfig:WaitForChild("RoleConfig"))
+
+local AbilityValidator = {}
+
+export type ValidationResult = {
+	success: boolean,
+	reason: string?,
+}
+
+local function ok(): ValidationResult
+	return { success = true }
+end
+
+local function fail(reason: string): ValidationResult
+	return { success = false, reason = reason }
+end
+
+local function hasConfigEntry(config: any, getterName: string, key: string): boolean
+	local getter = config[getterName]
+	if type(getter) == "function" then
+		return getter(key) ~= nil
+	end
+	return config[key] ~= nil
+end
+
+local function getResource(data: { [string]: any }): number
+	local stats = data.Stats
+	if type(stats) == "table" and type(stats.Resource) == "number" then
+		return stats.Resource
+	end
+	if type(data.Resource) == "number" then
+		return data.Resource
+	end
+	return 0
+end
+
+local function getResourceType(data: { [string]: any }): string?
+	local stats = data.Stats
+	if type(stats) == "table" and type(stats.ResourceType) == "string" and stats.ResourceType ~= "" then
+		return stats.ResourceType
+	end
+	if type(data.ResourceType) == "string" and data.ResourceType ~= "" then
+		return data.ResourceType
+	end
+	return nil
+end
+
+function AbilityValidator.HasRequiredLevel(data: { [string]: any }, abilityId: string): ValidationResult
+	local ability = AbilityConfig.GetAbility(abilityId)
+	if not ability then
+		return fail(string.format("Unknown ability '%s'.", abilityId))
+	end
+
+	local level = if type(data.Level) == "number" then data.Level else 1
+	if level < ability.requiredLevel then
+		return fail(string.format("'%s' requires level %d (you are level %d).", ability.name, ability.requiredLevel, level))
+	end
+	return ok()
+end
+
+function AbilityValidator.HasRequiredClassAndRole(data: { [string]: any }, abilityId: string): ValidationResult
+	local ability = AbilityConfig.GetAbility(abilityId)
+	if not ability then
+		return fail(string.format("Unknown ability '%s'.", abilityId))
+	end
+
+	if ability.className ~= nil then
+		local selectedClass = data.SelectedClass
+		if type(selectedClass) ~= "string" or selectedClass == "" then
+			return fail("No class selected.")
+		end
+		if not hasConfigEntry(ClassConfig, "GetClass", selectedClass) then
+			return fail(string.format("Class '%s' is not a recognised class.", selectedClass))
+		end
+		if not AbilityConfig.CanClassUseAbility(selectedClass, abilityId) then
+			return fail(string.format("Class '%s' cannot use '%s' (requires class '%s').", selectedClass, ability.name, ability.className))
+		end
+	end
+
+	if type(ability.allowedRoles) == "table" and #ability.allowedRoles > 0 then
+		local selectedRole = data.SelectedRole
+		if type(selectedRole) ~= "string" or selectedRole == "" then
+			return fail(string.format("No role selected. '%s' requires one of: %s.", ability.name, table.concat(ability.allowedRoles, ", ")))
+		end
+		if not hasConfigEntry(RoleConfig, "GetRole", selectedRole) then
+			return fail(string.format("Role '%s' is not a recognised role.", selectedRole))
+		end
+		if not AbilityConfig.CanRoleUseAbility(selectedRole, abilityId) then
+			return fail(string.format("Role '%s' cannot use '%s' (allowed roles: %s).", selectedRole, ability.name, table.concat(ability.allowedRoles, ", ")))
+		end
+	end
+
+	return ok()
+end
+
+function AbilityValidator.HasEnoughResource(data: { [string]: any }, abilityId: string): ValidationResult
+	local ability = AbilityConfig.GetAbility(abilityId)
+	if not ability then
+		return fail(string.format("Unknown ability '%s'.", abilityId))
+	end
+
+	if type(ability.resourceCost) ~= "number" or ability.resourceCost <= 0 then
+		return ok()
+	end
+
+	if ability.resourceType ~= nil then
+		local playerResourceType = getResourceType(data)
+		if playerResourceType ~= nil and playerResourceType ~= ability.resourceType then
+			return fail(string.format("Ability '%s' requires %s, but your resource type is %s.", ability.name, ability.resourceType, playerResourceType))
+		end
+	end
+
+	local currentResource = getResource(data)
+	if currentResource < ability.resourceCost then
+		return fail(string.format("Not enough %s to use '%s': need %d, have %d.", ability.resourceType or "resource", ability.name, ability.resourceCost, currentResource))
+	end
+	return ok()
+end
+
+function AbilityValidator.IsOffCooldown(abilityId: string, now: number, cooldownState: { [string]: number }?): ValidationResult
+	local ability = AbilityConfig.GetAbility(abilityId)
+	if not ability then
+		return fail(string.format("Unknown ability '%s'.", abilityId))
+	end
+
+	local state = cooldownState or {}
+	if ability.cooldown > 0 then
+		local lastUsed = state[abilityId]
+		if type(lastUsed) == "number" then
+			local remaining = ability.cooldown - (now - lastUsed)
+			if remaining > 0 then
+				return fail(string.format("'%s' is on cooldown (%.1fs remaining).", ability.name, remaining))
+			end
+		end
+	end
+
+	if ability.globalCooldown > 0 then
+		local lastGCD = state._gcd
+		if type(lastGCD) == "number" then
+			local remaining = ability.globalCooldown - (now - lastGCD)
+			if remaining > 0 then
+				return fail(string.format("Global cooldown active (%.2fs remaining).", remaining))
+			end
+		end
+	end
+
+	return ok()
+end
+
+function AbilityValidator.CanUseAbility(data: { [string]: any }, abilityId: string, now: number, cooldownState: { [string]: number }?): ValidationResult
+	if not AbilityConfig.IsValidAbility(abilityId) then
+		return fail(string.format("Unknown ability '%s'.", abilityId))
+	end
+
+	local levelResult = AbilityValidator.HasRequiredLevel(data, abilityId)
+	if not levelResult.success then return levelResult end
+
+	local classRoleResult = AbilityValidator.HasRequiredClassAndRole(data, abilityId)
+	if not classRoleResult.success then return classRoleResult end
+
+	local resourceResult = AbilityValidator.HasEnoughResource(data, abilityId)
+	if not resourceResult.success then return resourceResult end
+
+	return AbilityValidator.IsOffCooldown(abilityId, now, cooldownState)
+end
+
+return AbilityValidator
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">ed167eae44384558af0b21e54316ef78</UniqueId>
+					</Properties>
+				</Item>
+
 				<Item class="ModuleScript" referent="RBXB9B43866093C49EEA76B83958BE6D871">
 					<Properties>
 						<BinaryString name="AttributesSerialize"></BinaryString>
@@ -3457,8 +3784,11 @@ function PlayerDataService.LoadPlayer(player: Player)
 	if loadedData == nil then
 		loadedData = PlayerDataConfig.DeepCopyDefault()
 	else
-		PlayerDataConfig.MergeDefaults(loadedData, PlayerDataConfig.DeepCopyDefault())
+		PlayerDataConfig.Reconcile(loadedData, PlayerDataConfig.DeepCopyDefault())
 	end
+
+	-- Cooldowns are session-transient combat state and should never resume from a persisted save.
+	loadedData.AbilityCooldowns = {}
 
 	if not player.Parent then
 		loading[player] = nil
@@ -3479,6 +3809,8 @@ function PlayerDataService.SavePlayer(player: Player): boolean
 
 	data.Version = CURRENT_VERSION
 	local snapshot = PlayerDataConfig.DeepCopy(data)
+	-- Ability cooldowns are transient combat state; keep persisted saves clean.
+	snapshot.AbilityCooldowns = {}
 	local success = safeUpdate(getKey(player), snapshot)
 	if success then
 		print(string.format("[PlayerDataService] Saved %s.", player.Name))
@@ -4068,7 +4400,7 @@ return ClassService
 					<string name="Name">GhostyRPG_QuestSmokeTest</string>
 					<ProtectedString name="Source"><![CDATA[--!strict
 -- Module-loading smoke test for GhostyRPG foundations.
--- Does not initialize services or connect gameplay handlers; Boot.server owns that.
+-- Does not initialize services, mutate player data, spawn combat, or make network calls.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
@@ -4077,25 +4409,44 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Server = ServerScriptService:WaitForChild("Server")
 
 local allPassed = true
+local passCount = 0
+local failCount = 0
 local results: { string } = {}
 
 local function record(label: string, passed: boolean, detail: string?)
 	if passed then
+		passCount += 1
 		table.insert(results, string.format("[PASS] %s", label))
 	else
+		failCount += 1
 		allPassed = false
 		table.insert(results, string.format("[FAIL] %s%s", label, if detail then ": " .. detail else ""))
 	end
 end
 
-local playerDataConfig = require(Shared:WaitForChild("Config"):WaitForChild("PlayerDataConfig") :: ModuleScript)
-local itemConfig = require(Shared:WaitForChild("Config"):WaitForChild("ItemConfig") :: ModuleScript)
-require(Shared:WaitForChild("Config"):WaitForChild("QuestsConfig") :: ModuleScript)
+local function checkResultShape(result: any, label: string)
+	record(label .. " returns table", type(result) == "table")
+	if type(result) == "table" then
+		record(label .. ".success is boolean", type(result.success) == "boolean")
+		if result.success == false then
+			record(label .. ".reason is non-empty on failure", type(result.reason) == "string" and #result.reason > 0)
+		end
+	end
+end
+
+local Config = Shared:WaitForChild("Config")
+local Validators = Server:WaitForChild("Validators")
+
+local playerDataConfig = require(Config:WaitForChild("PlayerDataConfig") :: ModuleScript)
+local itemConfig = require(Config:WaitForChild("ItemConfig") :: ModuleScript)
+local abilityConfig = require(Config:WaitForChild("AbilityConfig") :: ModuleScript)
+require(Config:WaitForChild("QuestsConfig") :: ModuleScript)
 local questRemotes = require(Shared:WaitForChild("Remotes"):WaitForChild("QuestRemotes") :: ModuleScript)
 require(Server:WaitForChild("Config"):WaitForChild("QuestsServerConfig") :: ModuleScript)
-require(Server:WaitForChild("Validators"):WaitForChild("QuestValidator") :: ModuleScript)
-require(Server:WaitForChild("Validators"):WaitForChild("InventoryValidator") :: ModuleScript)
-local classValidator = require(Server:WaitForChild("Validators"):WaitForChild("ClassValidator") :: ModuleScript)
+require(Validators:WaitForChild("QuestValidator") :: ModuleScript)
+require(Validators:WaitForChild("InventoryValidator") :: ModuleScript)
+local abilityValidator = require(Validators:WaitForChild("AbilityValidator") :: ModuleScript)
+local classValidator = require(Validators:WaitForChild("ClassValidator") :: ModuleScript)
 local playerDataService = require(Server:WaitForChild("Services"):WaitForChild("PlayerDataService") :: ModuleScript)
 local inventoryService = require(Server:WaitForChild("Services"):WaitForChild("InventoryService") :: ModuleScript)
 local statsService = require(Server:WaitForChild("Services"):WaitForChild("StatsService") :: ModuleScript)
@@ -4105,6 +4456,14 @@ require(Server:WaitForChild("Services"):WaitForChild("QuestService") :: ModuleSc
 record("QuestRemotes.Ensure", type(questRemotes.Ensure) == "function")
 record("QuestRemotes.GetEvent", type(questRemotes.GetEvent) == "function")
 record("QuestRemotes.GetFunction", type(questRemotes.GetFunction) == "function")
+
+for _, methodName in ipairs({ "GetAbility", "IsValidAbility", "GetClassAbilities", "CanClassUseAbility", "CanRoleUseAbility" }) do
+	record(string.format("AbilityConfig.%s", methodName), type(abilityConfig[methodName]) == "function")
+end
+
+for _, methodName in ipairs({ "CanUseAbility", "HasRequiredLevel", "HasRequiredClassAndRole", "HasEnoughResource", "IsOffCooldown" }) do
+	record(string.format("AbilityValidator.%s", methodName), type(abilityValidator[methodName]) == "function")
+end
 
 for _, methodName in ipairs({ "Init", "LoadPlayer", "SavePlayer", "ScheduleSave", "GetData", "UpdateData", "IsLoaded", "ReleasePlayer" }) do
 	record(string.format("PlayerDataService.%s", methodName), type(playerDataService[methodName]) == "function")
@@ -4126,18 +4485,98 @@ for _, methodName in ipairs({ "Init", "SelectClass", "SelectRole", "GetClass", "
 	record(string.format("ClassService.%s", methodName), type(classService[methodName]) == "function")
 end
 
+for _, className in ipairs({ "Warrior", "Paladin", "Mage", "Priest", "Rogue", "Hunter" }) do
+	local abilities = abilityConfig.GetClassAbilities(className)
+	record(string.format("%s has at least one ability", className), type(abilities) == "table" and #abilities >= 1, string.format("found %d", if type(abilities) == "table" then #abilities else 0))
+end
+
+local requiredFields = { "id", "name", "description", "allowedRoles", "requiredLevel", "resourceCost", "cooldown", "globalCooldown", "range", "targetType", "effectType", "power", "threatModifier", "tags" }
+local sampleIds = { "WARRIOR_TAUNT", "WARRIOR_SHIELD_SLAM", "PALADIN_HOLY_LIGHT", "PALADIN_CONSECRATION", "MAGE_FIREBALL", "MAGE_MANA_SHIELD", "PRIEST_FLASH_HEAL", "PRIEST_POWER_WORD_SHIELD", "ROGUE_BACKSTAB", "ROGUE_VANISH", "HUNTER_AIMED_SHOT", "HUNTER_RAPID_FIRE", "SHARED_SECOND_WIND" }
+for _, abilityId in ipairs(sampleIds) do
+	local ability = abilityConfig.GetAbility(abilityId)
+	record(string.format("GetAbility(%s)", abilityId), type(ability) == "table")
+	if type(ability) == "table" then
+		for _, field in ipairs(requiredFields) do
+			record(string.format("%s.%s present", abilityId, field), ability[field] ~= nil)
+		end
+		record(string.format("%s.id matches key", abilityId), ability.id == abilityId)
+		record(string.format("%s.allowedRoles non-empty", abilityId), type(ability.allowedRoles) == "table" and #ability.allowedRoles >= 1)
+		record(string.format("%s.tags table", abilityId), type(ability.tags) == "table")
+	end
+end
+
+record("Warrior can use Taunt", abilityConfig.CanClassUseAbility("Warrior", "WARRIOR_TAUNT"))
+record("Mage cannot use Taunt", not abilityConfig.CanClassUseAbility("Mage", "WARRIOR_TAUNT"))
+record("Warrior cannot use Fireball", not abilityConfig.CanClassUseAbility("Warrior", "MAGE_FIREBALL"))
+record("Rogue cannot use Holy Light", not abilityConfig.CanClassUseAbility("Rogue", "PALADIN_HOLY_LIGHT"))
+for _, className in ipairs({ "Warrior", "Paladin", "Mage", "Priest", "Rogue", "Hunter" }) do
+	record(className .. " can use shared Second Wind", abilityConfig.CanClassUseAbility(className, "SHARED_SECOND_WIND"))
+end
+record("Tank can use Taunt", abilityConfig.CanRoleUseAbility("Tank", "WARRIOR_TAUNT"))
+record("Healer cannot use Taunt", not abilityConfig.CanRoleUseAbility("Healer", "WARRIOR_TAUNT"))
+record("Healer can use Flash Heal", abilityConfig.CanRoleUseAbility("Healer", "PRIEST_FLASH_HEAL"))
+record("DPS cannot use Flash Heal", not abilityConfig.CanRoleUseAbility("DPS", "PRIEST_FLASH_HEAL"))
+record("Unknown ability invalid", not abilityConfig.IsValidAbility("NOT_A_REAL_ABILITY"))
+
+local warriorTank = { Level = 10, SelectedClass = "Warrior", SelectedRole = "Tank", Stats = { Resource = 50, MaxResource = 100, ResourceType = "Rage" } }
+local mageDps = { Level = 10, SelectedClass = "Mage", SelectedRole = "DPS", Stats = { Resource = 80, MaxResource = 100, ResourceType = "Mana" } }
+local priestHealer = { Level = 10, SelectedClass = "Priest", SelectedRole = "Healer", Stats = { Resource = 100, MaxResource = 100, ResourceType = "Mana" } }
+local rogueDps = { Level = 10, SelectedClass = "Rogue", SelectedRole = "DPS", Stats = { Resource = 100, MaxResource = 100, ResourceType = "Energy" } }
+local lowLevelMage = { Level = 1, SelectedClass = "Mage", SelectedRole = "DPS", Stats = { Resource = 100, MaxResource = 100, ResourceType = "Mana" } }
+local noResourceRogue = { Level = 10, SelectedClass = "Rogue", SelectedRole = "DPS" }
+
+local now = os.clock()
+checkResultShape(abilityValidator.HasRequiredLevel(warriorTank, "WARRIOR_TAUNT"), "HasRequiredLevel")
+checkResultShape(abilityValidator.HasRequiredClassAndRole(warriorTank, "WARRIOR_TAUNT"), "HasRequiredClassAndRole")
+checkResultShape(abilityValidator.HasEnoughResource(warriorTank, "WARRIOR_TAUNT"), "HasEnoughResource")
+checkResultShape(abilityValidator.IsOffCooldown("WARRIOR_TAUNT", now, {}), "IsOffCooldown")
+checkResultShape(abilityValidator.CanUseAbility(warriorTank, "WARRIOR_TAUNT", now, {}), "CanUseAbility")
+
+record("Warrior Tank can use Taunt", abilityValidator.CanUseAbility(warriorTank, "WARRIOR_TAUNT", now, {}).success)
+record("Warrior Tank can use Shield Slam", abilityValidator.CanUseAbility(warriorTank, "WARRIOR_SHIELD_SLAM", now, {}).success)
+record("Mage DPS can use Fireball", abilityValidator.CanUseAbility(mageDps, "MAGE_FIREBALL", now, {}).success)
+record("Priest Healer can use Flash Heal", abilityValidator.CanUseAbility(priestHealer, "PRIEST_FLASH_HEAL", now, {}).success)
+record("Rogue DPS can use Backstab", abilityValidator.CanUseAbility(rogueDps, "ROGUE_BACKSTAB", now, {}).success)
+record("Mage DPS can use shared Second Wind", abilityValidator.CanUseAbility(mageDps, "SHARED_SECOND_WIND", now, {}).success)
+
+record("Mage cannot use Warrior Taunt", not abilityValidator.HasRequiredClassAndRole(mageDps, "WARRIOR_TAUNT").success)
+record("Wrong role/class rejected", not abilityValidator.HasRequiredClassAndRole(warriorTank, "PRIEST_FLASH_HEAL").success)
+record("Low level rejected", not abilityValidator.HasRequiredLevel(lowLevelMage, "MAGE_MANA_SHIELD").success)
+record("Missing resource rejected", not abilityValidator.HasEnoughResource(noResourceRogue, "ROGUE_SINISTER_STRIKE").success)
+record("Unknown ability rejected", not abilityValidator.CanUseAbility(warriorTank, "NOT_REAL", now, {}).success)
+
+record("Shield Slam cooldown active", not abilityValidator.IsOffCooldown("WARRIOR_SHIELD_SLAM", now, { WARRIOR_SHIELD_SLAM = now - 2 }).success)
+record("Shield Slam cooldown expired", abilityValidator.IsOffCooldown("WARRIOR_SHIELD_SLAM", now, { WARRIOR_SHIELD_SLAM = now - 10 }).success)
+record("Shield Slam never used", abilityValidator.IsOffCooldown("WARRIOR_SHIELD_SLAM", now, {}).success)
+record("GCD active blocks Heroic Strike", not abilityValidator.IsOffCooldown("WARRIOR_HEROIC_STRIKE", now, { _gcd = now - 0.5 }).success)
+record("GCD expired allows Heroic Strike", abilityValidator.IsOffCooldown("WARRIOR_HEROIC_STRIKE", now, { _gcd = now - 2.0 }).success)
+record("Off-GCD Taunt bypasses GCD", abilityValidator.IsOffCooldown("WARRIOR_TAUNT", now, { _gcd = now - 0.5 }).success)
+
+local originalLevel = warriorTank.Level
+local originalResource = warriorTank.Stats.Resource
+local cdSnapshot = { WARRIOR_TAUNT = now - 100 }
+local originalCooldown = cdSnapshot.WARRIOR_TAUNT
+abilityValidator.CanUseAbility(warriorTank, "WARRIOR_TAUNT", now, cdSnapshot)
+record("data.Level not mutated", warriorTank.Level == originalLevel)
+record("data.Stats.Resource not mutated", warriorTank.Stats.Resource == originalResource)
+record("cooldownState not mutated", cdSnapshot.WARRIOR_TAUNT == originalCooldown)
+
 for _, itemId in ipairs({ "item_health_potion", "item_mana_potion", "item_mistleaf", "item_goblin_dagger", "item_crypt_key", "item_iron_guard_vest", "item_bone_fragment", "starter_sword", "starter_staff", "starter_shield", "copper_ore", "empty_vial" }) do
 	record(string.format("ItemConfig has %s", itemId), itemConfig.IsValidItem(itemId))
 end
 
-local ok, data = pcall(playerDataConfig.DeepCopyDefault)
-if ok and type(data) == "table" then
-	for _, key in ipairs({ "Version", "Level", "Exp", "Gold", "SelectedClass", "SelectedRole", "Stats", "Inventory", "Equipment", "ActiveQuests", "CompletedQuests", "Professions", "DungeonProgress", "ArenaProfile", "Settings" }) do
+local okData, data = pcall(playerDataConfig.DeepCopyDefault)
+if okData and type(data) == "table" then
+	for _, key in ipairs({ "Version", "Level", "Exp", "Gold", "SelectedClass", "SelectedRole", "Stats", "Inventory", "Equipment", "ActiveQuests", "CompletedQuests", "Professions", "DungeonProgress", "ArenaProfile", "AbilityCooldowns", "Settings" }) do
 		record(string.format("PlayerData default has %s", key), data[key] ~= nil)
 	end
+	record("PlayerData default has Stats.Resource", type(data.Stats) == "table" and type(data.Stats.Resource) == "number")
+	record("PlayerData default has Stats.MaxResource", type(data.Stats) == "table" and type(data.Stats.MaxResource) == "number")
+	record("PlayerData default has Stats.ResourceType", type(data.Stats) == "table" and type(data.Stats.ResourceType) == "string")
 else
 	record("PlayerDataConfig.DeepCopyDefault", false, "failed or returned non-table")
 end
+record("PlayerDataConfig.Reconcile", type(playerDataConfig.Reconcile) == "function")
 
 local fallbackStats = statsService.CalculateFromData({ Level = 1, SelectedClass = "", SelectedRole = "", Equipment = {} })
 for _, key in ipairs({ "MaxHealth", "MaxResource", "AttackPower", "Armor", "HP", "MP", "Attack", "Defense", "Speed" }) do
@@ -4149,9 +4588,9 @@ for _, line in ipairs(results) do
 end
 
 if allPassed then
-	print("[GhostyRPG Smoke] All foundation checks passed.")
+	print(string.format("[GhostyRPG Smoke] All foundation checks passed (%d assertions).", passCount))
 else
-	warn("[GhostyRPG Smoke] One or more checks failed.")
+	warn(string.format("[GhostyRPG Smoke] %d passed, %d failed.", passCount, failCount))
 end
 ]]></ProtectedString>
 					<int64 name="SourceAssetId">-1</int64>
