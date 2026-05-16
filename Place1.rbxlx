@@ -2055,7 +2055,7 @@ return QuestsConfig
 
 local PlayerDataConfig = {}
 
-PlayerDataConfig.CURRENT_VERSION = 1
+PlayerDataConfig.CURRENT_VERSION = 2
 
 export type InventoryItemData = {
 	itemId: string,
@@ -2097,8 +2097,8 @@ export type ActiveQuestData = {
 export type CompletedQuestsMap = { [string]: number }
 
 export type ProfessionData = {
-	level: number,
-	exp: number,
+	Level: number,
+	XP: number,
 }
 
 export type DungeonProgressData = {
@@ -2170,8 +2170,8 @@ local DEFAULT_DATA: PlayerData = {
 	ActiveQuests = {},
 	CompletedQuests = {},
 	Professions = {
-		Mining = { level = 1, exp = 0 },
-		Alchemy = { level = 1, exp = 0 },
+		Mining = { Level = 1, XP = 0 },
+		Alchemy = { Level = 1, XP = 0 },
 	},
 	DungeonProgress = {},
 	ArenaProfile = {
@@ -2588,6 +2588,48 @@ ProfessionConfig.Alchemy = {
 	PassiveBonus = { PotionDurationBonus = 0.25, DoubleBrewChance = 0.15 },
 }
 
+-- Normalized profession schema consumed by ProfessionValidator and ProfessionService.
+-- The legacy display data above is preserved for UI/theme consumers.
+ProfessionConfig.Professions = {
+	Mining = {
+		Name = "Mining",
+		MaxLevel = 100,
+		ExperiencePerLevel = 100,
+		Materials = {
+			copper_ore = { Level = 1, XPReward = 10, ItemId = "copper_ore", Amount = 1 },
+		},
+		Recipes = {},
+	},
+	Alchemy = {
+		Name = "Alchemy",
+		MaxLevel = 100,
+		ExperiencePerLevel = 150,
+		Materials = {
+			mistleaf = { Level = 1, XPReward = 8, ItemId = "item_mistleaf", Amount = 1 },
+		},
+		Recipes = {
+			health_potion = {
+				Level = 1,
+				XPReward = 20,
+				Ingredients = {
+					{ ItemId = "item_mistleaf", Amount = 2 },
+					{ ItemId = "empty_vial", Amount = 1 },
+				},
+				Output = { ItemId = "item_health_potion", Amount = 1 },
+			},
+			mana_potion = {
+				Level = 10,
+				XPReward = 40,
+				Ingredients = {
+					{ ItemId = "item_mistleaf", Amount = 1 },
+					{ ItemId = "empty_vial", Amount = 1 },
+				},
+				Output = { ItemId = "item_mana_potion", Amount = 1 },
+			},
+		},
+	},
+}
+
 return ProfessionConfig
 ]]></ProtectedString>
 						<int64 name="SourceAssetId">-1</int64>
@@ -2909,6 +2951,173 @@ return QuestsServerConfig
 					<BinaryString name="Tags"></BinaryString>
 					<UniqueId name="UniqueId">f1702e2cb6e94ab796b947ceff5bd34f</UniqueId>
 				</Properties>
+
+				<Item class="ModuleScript" referent="RBX028414E1461D42828A2CE4B209E5FBFD">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">ProfessionValidator</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Pure validation for GhostyRPG professions. No service access and no mutation.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local ProfessionConfig = require(ServerScriptService:WaitForChild("Server"):WaitForChild("Config"):WaitForChild("ProfessionConfig"))
+local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"):WaitForChild("ItemConfig"))
+
+local ProfessionValidator = {}
+
+export type ValidationResult = {
+	success: boolean,
+	reason: string?,
+}
+
+local function ok(): ValidationResult
+	return { success = true }
+end
+
+local function fail(reason: string): ValidationResult
+	return { success = false, reason = reason }
+end
+
+local function getProfessionConfig(professionName: string): any?
+	local professions = ProfessionConfig.Professions
+	return if type(professions) == "table" then professions[professionName] else nil
+end
+
+local function getProfessionData(data: any, professionName: string): any?
+	if type(data) ~= "table" or type(data.Professions) ~= "table" then
+		return nil
+	end
+	return data.Professions[professionName]
+end
+
+local function getProfessionLevel(professionData: any): number
+	if type(professionData) ~= "table" then
+		return 0
+	end
+	if type(professionData.Level) == "number" then
+		return professionData.Level
+	end
+	if type(professionData.level) == "number" then
+		return professionData.level
+	end
+	return 0
+end
+
+local function isKnownItem(itemId: any): boolean
+	return type(itemId) == "string" and type(ItemConfig.IsValidItem) == "function" and ItemConfig.IsValidItem(itemId)
+end
+
+function ProfessionValidator.IsValidProfession(professionName: string): ValidationResult
+	if type(professionName) ~= "string" or professionName == "" then
+		return fail("professionName must be a non-empty string.")
+	end
+	if not getProfessionConfig(professionName) then
+		return fail(string.format("Unknown profession '%s'.", professionName))
+	end
+	return ok()
+end
+
+function ProfessionValidator.CanGainExperience(data: any, professionName: string, amount: number): ValidationResult
+	local valid = ProfessionValidator.IsValidProfession(professionName)
+	if not valid.success then
+		return valid
+	end
+	if type(amount) ~= "number" or amount <= 0 then
+		return fail("amount must be a positive number.")
+	end
+
+	local professionData = getProfessionData(data, professionName)
+	if not professionData then
+		return fail(string.format("Player has no data for profession '%s'.", professionName))
+	end
+
+	local professionConfig = getProfessionConfig(professionName)
+	local maxLevel = professionConfig.MaxLevel or math.huge
+	if getProfessionLevel(professionData) >= maxLevel then
+		return fail(string.format("Profession '%s' is already at max level.", professionName))
+	end
+	return ok()
+end
+
+function ProfessionValidator.CanGather(data: any, professionName: string, materialId: string): ValidationResult
+	local valid = ProfessionValidator.IsValidProfession(professionName)
+	if not valid.success then
+		return valid
+	end
+	if type(materialId) ~= "string" or materialId == "" then
+		return fail("materialId must be a non-empty string.")
+	end
+
+	local professionConfig = getProfessionConfig(professionName)
+	local materials = professionConfig.Materials
+	local materialDef = if type(materials) == "table" then materials[materialId] else nil
+	if not materialDef then
+		return fail(string.format("Material '%s' is not available in profession '%s'.", materialId, professionName))
+	end
+	if not isKnownItem(materialDef.ItemId) then
+		return fail(string.format("Item '%s' referenced by material '%s' does not exist in ItemConfig.", tostring(materialDef.ItemId), materialId))
+	end
+
+	local professionData = getProfessionData(data, professionName)
+	if not professionData then
+		return fail(string.format("Player has no data for profession '%s'.", professionName))
+	end
+	local requiredLevel = materialDef.Level or materialDef.MinLevel or 1
+	local level = getProfessionLevel(professionData)
+	if level < requiredLevel then
+		return fail(string.format("Requires %s level %d (player is level %d).", professionName, requiredLevel, level))
+	end
+	return ok()
+end
+
+function ProfessionValidator.CanCraft(data: any, professionName: string, recipeName: string): ValidationResult
+	local valid = ProfessionValidator.IsValidProfession(professionName)
+	if not valid.success then
+		return valid
+	end
+	if type(recipeName) ~= "string" or recipeName == "" then
+		return fail("recipeName must be a non-empty string.")
+	end
+
+	local professionConfig = getProfessionConfig(professionName)
+	local recipes = professionConfig.Recipes
+	local recipeDef = if type(recipes) == "table" then recipes[recipeName] else nil
+	if not recipeDef then
+		return fail(string.format("Recipe '%s' is not available in profession '%s'.", recipeName, professionName))
+	end
+	if type(recipeDef.Output) ~= "table" or not isKnownItem(recipeDef.Output.ItemId) then
+		return fail(string.format("Output item '%s' for recipe '%s' does not exist in ItemConfig.", tostring(recipeDef.Output and recipeDef.Output.ItemId), recipeName))
+	end
+	for _, ingredient in ipairs(recipeDef.Ingredients or {}) do
+		if not isKnownItem(ingredient.ItemId) then
+			return fail(string.format("Ingredient item '%s' for recipe '%s' does not exist in ItemConfig.", tostring(ingredient.ItemId), recipeName))
+		end
+	end
+
+	local professionData = getProfessionData(data, professionName)
+	if not professionData then
+		return fail(string.format("Player has no data for profession '%s'.", professionName))
+	end
+	local requiredLevel = recipeDef.Level or recipeDef.RequiredLevel or 1
+	local level = getProfessionLevel(professionData)
+	if level < requiredLevel then
+		return fail(string.format("Recipe '%s' requires %s level %d (player is level %d).", recipeName, professionName, requiredLevel, level))
+	end
+	return ok()
+end
+
+return ProfessionValidator
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">9017aa2c35ce4b57a3eac5ba714b8e6d</UniqueId>
+					</Properties>
+				</Item>
 
 				<Item class="ModuleScript" referent="RBX72D39CBDC68141C6A8A5FCDE6D33E961">
 					<Properties>
@@ -3472,7 +3681,183 @@ return ClassValidator
 						<UniqueId name="UniqueId">2bfcbf43838e4d629c6c60e3bae62b60</UniqueId>
 					</Properties>
 				</Item>
-			</Item>
+			
+				<Item class="ModuleScript" referent="RBX626548512051FAAD9A9F358FF4077992">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">PartyValidator</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Pure, stateless validation for GhostyRPG party operations.
+-- No service access, no mutation, and no Roblox-only calls so it can be tested with fake players.
+
+local PartyValidator = {}
+
+PartyValidator.MAX_PARTY_SIZE = 5
+PartyValidator.INVITE_EXPIRE_SECONDS = 60
+PartyValidator.INVITE_EXPIRE_S = PartyValidator.INVITE_EXPIRE_SECONDS
+
+export type Result = {
+	ok: boolean,
+	code: string,
+	message: string,
+}
+
+local function ok(): Result
+	return { ok = true, code = "OK", message = "OK" }
+end
+
+local function fail(code: string, message: string): Result
+	return { ok = false, code = code, message = message }
+end
+
+local function isPlayer(value: any): boolean
+	-- Intentionally duck-typed: production passes Player instances, tests can pass plain tables.
+	return value ~= nil
+end
+
+local function hasMember(party: any, player: any): boolean
+	if type(party) ~= "table" or type(party.members) ~= "table" then
+		return false
+	end
+	for _, member in ipairs(party.members) do
+		if member == player then
+			return true
+		end
+	end
+	return false
+end
+
+function PartyValidator.ValidateCreateParty(leader: any, playerPartyMap: { [any]: string? }): Result
+	if not isPlayer(leader) then
+		return fail("INVALID_PLAYER", "Leader must be a valid player.")
+	end
+	if playerPartyMap[leader] ~= nil then
+		return fail("ALREADY_IN_PARTY", "Leader is already in a party.")
+	end
+	return ok()
+end
+
+function PartyValidator.ValidateInvite(leader: any, target: any, leaderParty: any, playerPartyMap: { [any]: string? }, pendingInvites: { [any]: { [string]: number } }, now: number): Result
+	if not isPlayer(leader) then
+		return fail("INVALID_PLAYER", "Leader must be a valid player.")
+	end
+	if not isPlayer(target) then
+		return fail("INVALID_PLAYER", "Target must be a valid player.")
+	end
+	if leader == target then
+		return fail("INVITE_TO_SELF", "You cannot invite yourself.")
+	end
+	if type(leaderParty) ~= "table" then
+		return fail("NOT_IN_PARTY", "Leader does not have an active party.")
+	end
+	if leaderParty.leader ~= leader then
+		return fail("NOT_LEADER", "Only the party leader can send invites.")
+	end
+	if type(leaderParty.members) ~= "table" then
+		return fail("INVALID_PARTY", "Party is missing its members list.")
+	end
+	if #leaderParty.members >= PartyValidator.MAX_PARTY_SIZE then
+		return fail("PARTY_FULL", string.format("The party is full (max %d players).", PartyValidator.MAX_PARTY_SIZE))
+	end
+	if hasMember(leaderParty, target) then
+		return fail("INVITE_ALREADY_MEMBER", "That player is already in your party.")
+	end
+	if playerPartyMap[target] ~= nil then
+		return fail("INVITE_TARGET_IN_PARTY", "That player is already in another party.")
+	end
+
+	local targetInvites = pendingInvites[target]
+	local expiry = if targetInvites then targetInvites[leaderParty.id] else nil
+	if type(expiry) == "number" and now < expiry then
+		return fail("INVITE_PENDING", "An invite to that player is already pending.")
+	end
+
+	return ok()
+end
+
+function PartyValidator.ValidateAccept(player: any, partyId: string, party: any, playerPartyMap: { [any]: string? }, pendingInvites: { [any]: { [string]: number } }, now: number): Result
+	if not isPlayer(player) then
+		return fail("INVALID_PLAYER", "Player must be valid.")
+	end
+	if type(partyId) ~= "string" or partyId == "" or type(party) ~= "table" then
+		return fail("INVALID_PARTY", "Party does not exist.")
+	end
+	if playerPartyMap[player] ~= nil then
+		return fail("ALREADY_IN_PARTY", "You are already in a party.")
+	end
+
+	local playerInvites = pendingInvites[player]
+	local expiry = if playerInvites then playerInvites[partyId] else nil
+	if type(expiry) ~= "number" then
+		return fail("INVITE_NOT_FOUND", "No pending invite found for that party.")
+	end
+	if now >= expiry then
+		return fail("INVITE_NOT_FOUND", "The invite has expired.")
+	end
+	if type(party.members) ~= "table" then
+		return fail("INVALID_PARTY", "Party is missing its members list.")
+	end
+	if #party.members >= PartyValidator.MAX_PARTY_SIZE then
+		return fail("PARTY_FULL", "The party is now full.")
+	end
+
+	return ok()
+end
+
+function PartyValidator.ValidateDecline(player: any, partyId: string, pendingInvites: { [any]: { [string]: number } }): Result
+	if not isPlayer(player) then
+		return fail("INVALID_PLAYER", "Player must be valid.")
+	end
+	local playerInvites = pendingInvites[player]
+	if type(partyId) ~= "string" or partyId == "" or not playerInvites or playerInvites[partyId] == nil then
+		return fail("INVITE_NOT_FOUND", "No pending invite found for that party.")
+	end
+	return ok()
+end
+
+function PartyValidator.ValidateLeave(player: any, party: any): Result
+	if not isPlayer(player) then
+		return fail("INVALID_PLAYER", "Player must be valid.")
+	end
+	if type(party) ~= "table" then
+		return fail("NOT_IN_PARTY", "You are not in a party.")
+	end
+	return ok()
+end
+
+function PartyValidator.ValidateKick(leader: any, target: any, party: any): Result
+	if not isPlayer(leader) then
+		return fail("INVALID_PLAYER", "Leader must be valid.")
+	end
+	if not isPlayer(target) then
+		return fail("INVALID_PLAYER", "Target must be valid.")
+	end
+	if type(party) ~= "table" then
+		return fail("NOT_IN_PARTY", "You are not in a party.")
+	end
+	if party.leader ~= leader then
+		return fail("NOT_LEADER", "Only the party leader can kick members.")
+	end
+	if leader == target then
+		return fail("KICK_SELF", "You cannot kick yourself; leave or disband the party instead.")
+	end
+	if not hasMember(party, target) then
+		return fail("KICK_NOT_MEMBER", "That player is not in your party.")
+	end
+	return ok()
+end
+
+return PartyValidator
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">a03ea2146e650ae2f307ce8af2c27c81</UniqueId>
+					</Properties>
+				</Item>
+</Item>
 			<Item class="Folder" referent="RBX1EC99083147E424890DB20CC53F1C3EF">
 				<Properties>
 					<BinaryString name="AttributesSerialize"></BinaryString>
@@ -4924,6 +5309,241 @@ return PlayerDataService
 						<UniqueId name="UniqueId">491ebe14ff8d4e9180578ebb5ccac5be</UniqueId>
 					</Properties>
 				</Item>
+				<Item class="ModuleScript" referent="RBX98DBD527D4FB4E579BDD83B9FD27AF01">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">ProfessionService</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Server-authoritative profession progression, gathering, and crafting.
+-- Dependencies are injected through Init; no player state is touched until public methods are called.
+
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local ProfessionConfig = require(ServerScriptService:WaitForChild("Server"):WaitForChild("Config"):WaitForChild("ProfessionConfig"))
+local ProfessionValidator = require(ServerScriptService:WaitForChild("Server"):WaitForChild("Validators"):WaitForChild("ProfessionValidator"))
+
+local ProfessionService = {}
+
+local playerDataService: any = nil
+local inventoryService: any = nil
+local initialized = false
+
+local function ok(payload: any?)
+	return { success = true, data = payload }
+end
+
+local function fail(reason: string)
+	return { success = false, reason = reason }
+end
+
+local function assertInitialized()
+	assert(initialized and playerDataService and inventoryService, "ProfessionService requires Init(playerDataService, inventoryService) before use.")
+end
+
+local function getPlayerData(player: Player): any?
+	assertInitialized()
+	return playerDataService.GetData(player)
+end
+
+local function scheduleSave(player: Player)
+	if type(playerDataService.ScheduleSave) == "function" then
+		playerDataService.ScheduleSave(player)
+	end
+end
+
+local function ensureProfessions(data: any): { [string]: any }
+	if type(data.Professions) ~= "table" then
+		data.Professions = {}
+	end
+	for professionName in pairs(ProfessionConfig.Professions) do
+		if type(data.Professions[professionName]) ~= "table" then
+			data.Professions[professionName] = { Level = 1, XP = 0 }
+		else
+			local professionData = data.Professions[professionName]
+			if type(professionData.Level) ~= "number" then
+				professionData.Level = professionData.level or 1
+			end
+			if type(professionData.XP) ~= "number" then
+				professionData.XP = professionData.exp or 0
+			end
+		end
+	end
+	return data.Professions
+end
+
+local function experienceForLevel(professionConfig: any, currentLevel: number): number
+	local formula = professionConfig.ExperiencePerLevel
+	if type(formula) == "function" then
+		return math.max(1, math.floor(formula(currentLevel)))
+	end
+	if type(formula) == "number" then
+		return math.max(1, math.floor(currentLevel * formula))
+	end
+	return math.max(1, currentLevel * 100)
+end
+
+local function applyLevelUps(professionConfig: any, professionData: any): number
+	local maxLevel = professionConfig.MaxLevel or math.huge
+	local gained = 0
+	while professionData.Level < maxLevel do
+		local threshold = experienceForLevel(professionConfig, professionData.Level)
+		if professionData.XP < threshold then
+			break
+		end
+		professionData.XP -= threshold
+		professionData.Level += 1
+		gained += 1
+	end
+	if professionData.Level >= maxLevel then
+		professionData.XP = 0
+	end
+	return gained
+end
+
+function ProfessionService.Init(newPlayerDataService: any, newInventoryService: any)
+	if initialized then
+		warn("[ProfessionService] Init called more than once; ignoring duplicate call.")
+		return
+	end
+	assert(newPlayerDataService, "ProfessionService.Init requires PlayerDataService.")
+	assert(type(newPlayerDataService.GetData) == "function", "ProfessionService.Init requires PlayerDataService.GetData.")
+	assert(type(newPlayerDataService.ScheduleSave) == "function", "ProfessionService.Init requires PlayerDataService.ScheduleSave.")
+	assert(newInventoryService, "ProfessionService.Init requires InventoryService.")
+	assert(type(newInventoryService.AddItem) == "function", "ProfessionService.Init requires InventoryService.AddItem.")
+	assert(type(newInventoryService.RemoveItem) == "function", "ProfessionService.Init requires InventoryService.RemoveItem.")
+	assert(type(newInventoryService.HasItem) == "function", "ProfessionService.Init requires InventoryService.HasItem.")
+
+	playerDataService = newPlayerDataService
+	inventoryService = newInventoryService
+	initialized = true
+	print("[ProfessionService] Initialized.")
+end
+
+function ProfessionService.AddExperience(player: Player, professionName: string, amount: number)
+	local data = getPlayerData(player)
+	if not data then
+		return fail("Player data unavailable.")
+	end
+	ensureProfessions(data)
+
+	local validation = ProfessionValidator.CanGainExperience(data, professionName, amount)
+	if not validation.success then
+		return fail(validation.reason or "Cannot gain profession experience.")
+	end
+
+	local professionData = data.Professions[professionName]
+	local professionConfig = ProfessionConfig.Professions[professionName]
+	professionData.XP += amount
+	local levelsGained = applyLevelUps(professionConfig, professionData)
+	scheduleSave(player)
+	return ok({ levelsGained = levelsGained, newLevel = professionData.Level, newXP = professionData.XP })
+end
+
+function ProfessionService.GetProfessionData(player: Player, professionName: string)
+	local valid = ProfessionValidator.IsValidProfession(professionName)
+	if not valid.success then
+		return fail(valid.reason or "Invalid profession.")
+	end
+	local data = getPlayerData(player)
+	if not data then
+		return fail("Player data unavailable.")
+	end
+	ensureProfessions(data)
+	local professionData = data.Professions[professionName]
+	local professionConfig = ProfessionConfig.Professions[professionName]
+	return ok({
+		Level = professionData.Level,
+		XP = professionData.XP,
+		NextLevelXP = if professionData.Level < (professionConfig.MaxLevel or math.huge) then experienceForLevel(professionConfig, professionData.Level) else 0,
+		MaxLevel = professionConfig.MaxLevel,
+	})
+end
+
+function ProfessionService.Gather(player: Player, professionName: string, materialId: string, amount: number?)
+	local data = getPlayerData(player)
+	if not data then
+		return fail("Player data unavailable.")
+	end
+	ensureProfessions(data)
+
+	local validation = ProfessionValidator.CanGather(data, professionName, materialId)
+	if not validation.success then
+		return fail(validation.reason or "Cannot gather material.")
+	end
+	local gatherAmount = if type(amount) == "number" and amount > 0 then math.floor(amount) else 1
+	local material = ProfessionConfig.Professions[professionName].Materials[materialId]
+	local itemAmount = (material.Amount or 1) * gatherAmount
+	if inventoryService.AddItem(player, material.ItemId, itemAmount) == false then
+		return fail(string.format("InventoryService failed to add item '%s'.", material.ItemId))
+	end
+	local xpReward = (material.XPReward or 0) * gatherAmount
+	if xpReward > 0 then
+		ProfessionService.AddExperience(player, professionName, xpReward)
+	else
+		scheduleSave(player)
+	end
+	return ok({ itemId = material.ItemId, itemAmount = itemAmount, xpAwarded = xpReward })
+end
+
+function ProfessionService.Craft(player: Player, professionName: string, recipeName: string)
+	local data = getPlayerData(player)
+	if not data then
+		return fail("Player data unavailable.")
+	end
+	ensureProfessions(data)
+
+	local validation = ProfessionValidator.CanCraft(data, professionName, recipeName)
+	if not validation.success then
+		return fail(validation.reason or "Cannot craft recipe.")
+	end
+	local recipe = ProfessionConfig.Professions[professionName].Recipes[recipeName]
+
+	for _, ingredient in ipairs(recipe.Ingredients or {}) do
+		if not inventoryService.HasItem(player, ingredient.ItemId, ingredient.Amount) then
+			return fail(string.format("Missing ingredient: %d x %s.", ingredient.Amount, ingredient.ItemId))
+		end
+	end
+
+	local consumed = {}
+	for _, ingredient in ipairs(recipe.Ingredients or {}) do
+		if inventoryService.RemoveItem(player, ingredient.ItemId, ingredient.Amount) == false then
+			for _, restored in ipairs(consumed) do
+				inventoryService.AddItem(player, restored.ItemId, restored.Amount)
+			end
+			return fail(string.format("Failed to consume ingredient '%s'.", ingredient.ItemId))
+		end
+		table.insert(consumed, { ItemId = ingredient.ItemId, Amount = ingredient.Amount })
+	end
+
+	local output = recipe.Output
+	local outputAmount = output.Amount or 1
+	if inventoryService.AddItem(player, output.ItemId, outputAmount) == false then
+		for _, restored in ipairs(consumed) do
+			inventoryService.AddItem(player, restored.ItemId, restored.Amount)
+		end
+		return fail(string.format("InventoryService failed to add output item '%s'.", output.ItemId))
+	end
+
+	local xpReward = recipe.XPReward or 0
+	if xpReward > 0 then
+		ProfessionService.AddExperience(player, professionName, xpReward)
+	else
+		scheduleSave(player)
+	end
+	return ok({ recipeName = recipeName, outputItemId = output.ItemId, outputAmount = outputAmount, xpAwarded = xpReward })
+end
+
+return ProfessionService
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">a25dc977ffd44b8280142ed11599c918</UniqueId>
+					</Properties>
+				</Item>
+
 				<Item class="ModuleScript" referent="RBXC635F5F1B2FD416D916D07C137BAC111">
 					<Properties>
 						<BinaryString name="AttributesSerialize"></BinaryString>
@@ -5457,7 +6077,316 @@ return ClassService
 						<UniqueId name="UniqueId">5f4412b9cc5c44ecba26e3187b29bf73</UniqueId>
 					</Properties>
 				</Item>
-			</Item>
+			
+				<Item class="ModuleScript" referent="RBXB473AC5719B19C1C7D98E291FD2B117E">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">PartyService</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Server-authoritative, session-scoped party state for GhostyRPG.
+-- Parties are in-memory only; UI remotes can call this service after validating requests server-side.
+
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local PartyValidator = require(ServerScriptService:WaitForChild("Server"):WaitForChild("Validators"):WaitForChild("PartyValidator"))
+
+local PartyService = {}
+
+type Party = {
+	id: string,
+	leader: Player,
+	members: { Player },
+	createdAt: number,
+}
+
+type Result = {
+	ok: boolean,
+	code: string,
+	message: string,
+	data: any?,
+}
+
+local parties: { [string]: Party } = {}
+local playerParty: { [Player]: string } = {}
+local pendingInvites: { [Player]: { [string]: number } } = {}
+local playerDataService: any = nil
+local initialized = false
+
+local function makeResult(ok: boolean, code: string, message: string, data: any?): Result
+	return { ok = ok, code = code, message = message, data = data }
+end
+
+local function okResult(message: string?, data: any?): Result
+	return makeResult(true, "OK", message or "OK", data)
+end
+
+local function failResult(validationResult: any, data: any?): Result
+	return makeResult(false, validationResult.code or "ERROR", validationResult.message or "Party operation failed.", data)
+end
+
+local function playerName(player: any): string
+	local name = if player ~= nil then player.Name else nil
+	return if type(name) == "string" then name else "Player"
+end
+
+local function generatePartyId(): string
+	return "party_" .. HttpService:GenerateGUID(false)
+end
+
+local function clearInviteForParty(partyId: string)
+	for target, inviteMap in pairs(pendingInvites) do
+		inviteMap[partyId] = nil
+		if next(inviteMap) == nil then
+			pendingInvites[target] = nil
+		end
+	end
+end
+
+local function pruneExpiredInvites(player: Player?)
+	if player == nil then
+		return
+	end
+	local inviteMap = pendingInvites[player]
+	if not inviteMap then
+		return
+	end
+	local now = os.clock()
+	for partyId, expiry in pairs(inviteMap) do
+		if now >= expiry or parties[partyId] == nil then
+			inviteMap[partyId] = nil
+		end
+	end
+	if next(inviteMap) == nil then
+		pendingInvites[player] = nil
+	end
+end
+
+local function removeMemberFromParty(party: Party, player: Player)
+	local members = {}
+	for _, member in ipairs(party.members) do
+		if member ~= player then
+			table.insert(members, member)
+		end
+	end
+	party.members = members
+	playerParty[player] = nil
+end
+
+local function forgetPlayer(player: Player)
+	local partyId = playerParty[player]
+	local party = if partyId then parties[partyId] else nil
+	if party then
+		if party.leader == player then
+			PartyService.DisbandParty(partyId)
+		else
+			removeMemberFromParty(party, player)
+		end
+	else
+		playerParty[player] = nil
+	end
+
+	pendingInvites[player] = nil
+	for target, inviteMap in pairs(pendingInvites) do
+		for invitePartyId in pairs(inviteMap) do
+			if parties[invitePartyId] == nil then
+				inviteMap[invitePartyId] = nil
+			end
+		end
+		if next(inviteMap) == nil then
+			pendingInvites[target] = nil
+		end
+	end
+end
+
+function PartyService.Init(newPlayerDataService: any)
+	if initialized then
+		warn("[PartyService] Init called more than once; ignoring duplicate call.")
+		return
+	end
+	assert(newPlayerDataService ~= nil, "PartyService.Init requires PlayerDataService.")
+
+	playerDataService = newPlayerDataService
+	initialized = true
+
+	Players.PlayerRemoving:Connect(function(player)
+		forgetPlayer(player)
+	end)
+
+	print("[PartyService] Initialized.")
+end
+
+function PartyService.CreateParty(leader: Player): Result
+	local validation = PartyValidator.ValidateCreateParty(leader, playerParty)
+	if not validation.ok then
+		return failResult(validation)
+	end
+
+	local partyId = generatePartyId()
+	local party: Party = {
+		id = partyId,
+		leader = leader,
+		members = { leader },
+		createdAt = os.clock(),
+	}
+	parties[partyId] = party
+	playerParty[leader] = partyId
+
+	return okResult("Party created.", { party = party })
+end
+
+function PartyService.InvitePlayer(leader: Player, targetPlayer: Player): Result
+	pruneExpiredInvites(targetPlayer)
+	local leaderParty = parties[playerParty[leader]]
+	local now = os.clock()
+	local validation = PartyValidator.ValidateInvite(leader, targetPlayer, leaderParty, playerParty, pendingInvites, now)
+	if not validation.ok then
+		return failResult(validation)
+	end
+
+	if not pendingInvites[targetPlayer] then
+		pendingInvites[targetPlayer] = {}
+	end
+	local expiry = now + PartyValidator.INVITE_EXPIRE_SECONDS
+	pendingInvites[targetPlayer][leaderParty.id] = expiry
+
+	return okResult(string.format("Invite sent to %s.", playerName(targetPlayer)), { partyId = leaderParty.id, expiry = expiry })
+end
+
+function PartyService.AcceptInvite(player: Player, partyId: string): Result
+	pruneExpiredInvites(player)
+	local party = parties[partyId]
+	local validation = PartyValidator.ValidateAccept(player, partyId, party, playerParty, pendingInvites, os.clock())
+	if not validation.ok then
+		return failResult(validation)
+	end
+
+	pendingInvites[player][partyId] = nil
+	if next(pendingInvites[player]) == nil then
+		pendingInvites[player] = nil
+	end
+
+	table.insert(party.members, player)
+	playerParty[player] = partyId
+
+	return okResult(string.format("%s joined the party.", playerName(player)), { party = party })
+end
+
+function PartyService.DeclineInvite(player: Player, partyId: string): Result
+	pruneExpiredInvites(player)
+	local validation = PartyValidator.ValidateDecline(player, partyId, pendingInvites)
+	if not validation.ok then
+		return failResult(validation)
+	end
+
+	pendingInvites[player][partyId] = nil
+	if next(pendingInvites[player]) == nil then
+		pendingInvites[player] = nil
+	end
+
+	return okResult("Invite declined.", { partyId = partyId })
+end
+
+function PartyService.LeaveParty(player: Player): Result
+	local partyId = playerParty[player]
+	local party = if partyId then parties[partyId] else nil
+	local validation = PartyValidator.ValidateLeave(player, party)
+	if not validation.ok then
+		return failResult(validation)
+	end
+
+	if party.leader == player then
+		return PartyService.DisbandParty(partyId)
+	end
+
+	removeMemberFromParty(party, player)
+	return okResult(string.format("%s left the party.", playerName(player)), { partyId = partyId, remainingMembers = #party.members })
+end
+
+function PartyService.KickMember(leader: Player, targetPlayer: Player): Result
+	local partyId = playerParty[leader]
+	local party = if partyId then parties[partyId] else nil
+	local validation = PartyValidator.ValidateKick(leader, targetPlayer, party)
+	if not validation.ok then
+		return failResult(validation)
+	end
+
+	removeMemberFromParty(party, targetPlayer)
+	pendingInvites[targetPlayer] = nil
+	return okResult(string.format("%s was kicked from the party.", playerName(targetPlayer)), { partyId = partyId, kicked = targetPlayer })
+end
+
+function PartyService.DisbandParty(partyId: string): Result
+	local party = parties[partyId]
+	if not party then
+		return makeResult(false, "INVALID_PARTY", "Party does not exist.", nil)
+	end
+
+	local evictedMembers = {}
+	for _, member in ipairs(party.members) do
+		playerParty[member] = nil
+		table.insert(evictedMembers, member)
+	end
+	parties[partyId] = nil
+	clearInviteForParty(partyId)
+
+	return okResult("Party disbanded.", { partyId = partyId, evictedMembers = evictedMembers })
+end
+
+function PartyService.GetParty(player: Player?): Party?
+	if player == nil then
+		return nil
+	end
+	local partyId = playerParty[player]
+	return if partyId then parties[partyId] else nil
+end
+
+function PartyService.GetPartyById(partyId: string?): Party?
+	return if type(partyId) == "string" then parties[partyId] else nil
+end
+
+function PartyService.IsLeader(player: Player?): boolean
+	local party = PartyService.GetParty(player)
+	return party ~= nil and party.leader == player
+end
+
+function PartyService.GetMembers(partyId: string?): { Player }?
+	if type(partyId) ~= "string" then
+		return nil
+	end
+	local party = parties[partyId]
+	if not party then
+		return nil
+	end
+	local copy = {}
+	for index, member in ipairs(party.members) do
+		copy[index] = member
+	end
+	return copy
+end
+
+function PartyService._GetState()
+	return {
+		parties = parties,
+		playerParty = playerParty,
+		pendingInvites = pendingInvites,
+		playerDataService = playerDataService,
+		initialized = initialized,
+	}
+end
+
+return PartyService
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">0ff9c98c6afd514d7c279571b693d13a</UniqueId>
+					</Properties>
+				</Item>
+</Item>
 			<Item class="Script" referent="RBXDE5EC164C1F244C3B1632F260C99FC90">
 				<Properties>
 					<BinaryString name="AttributesSerialize"></BinaryString>
@@ -5516,11 +6445,15 @@ require(Validators:WaitForChild("QuestValidator") :: ModuleScript)
 require(Validators:WaitForChild("InventoryValidator") :: ModuleScript)
 local abilityValidator = require(Validators:WaitForChild("AbilityValidator") :: ModuleScript)
 local classValidator = require(Validators:WaitForChild("ClassValidator") :: ModuleScript)
+local professionValidator = require(Validators:WaitForChild("ProfessionValidator") :: ModuleScript)
+local partyValidator = require(Validators:WaitForChild("PartyValidator") :: ModuleScript)
 local playerDataService = require(Server:WaitForChild("Services"):WaitForChild("PlayerDataService") :: ModuleScript)
 local inventoryService = require(Server:WaitForChild("Services"):WaitForChild("InventoryService") :: ModuleScript)
 local statsService = require(Server:WaitForChild("Services"):WaitForChild("StatsService") :: ModuleScript)
 local combatService = require(Server:WaitForChild("Services"):WaitForChild("CombatService") :: ModuleScript)
 local lootService = require(Server:WaitForChild("Services"):WaitForChild("LootService") :: ModuleScript)
+local professionService = require(Server:WaitForChild("Services"):WaitForChild("ProfessionService") :: ModuleScript)
+local partyService = require(Server:WaitForChild("Services"):WaitForChild("PartyService") :: ModuleScript)
 local mobService = require(Server:WaitForChild("Services"):WaitForChild("MobService") :: ModuleScript)
 local classService = require(Server:WaitForChild("Services"):WaitForChild("ClassService") :: ModuleScript)
 require(Server:WaitForChild("Services"):WaitForChild("QuestService") :: ModuleScript)
@@ -5557,6 +6490,16 @@ for _, methodName in ipairs({ "IsValidClass", "IsValidRole", "CanSelectClass", "
 	record(string.format("ClassValidator.%s", methodName), type(classValidator[methodName]) == "function")
 end
 
+for _, methodName in ipairs({ "IsValidProfession", "CanGainExperience", "CanGather", "CanCraft" }) do
+	record(string.format("ProfessionValidator.%s", methodName), type(professionValidator[methodName]) == "function")
+end
+
+for _, methodName in ipairs({ "ValidateCreateParty", "ValidateInvite", "ValidateAccept", "ValidateDecline", "ValidateLeave", "ValidateKick" }) do
+	record(string.format("PartyValidator.%s", methodName), type(partyValidator[methodName]) == "function")
+end
+record("PartyValidator.MAX_PARTY_SIZE", partyValidator.MAX_PARTY_SIZE == 5)
+record("PartyValidator.INVITE_EXPIRE_SECONDS", partyValidator.INVITE_EXPIRE_SECONDS == 60)
+
 for _, methodName in ipairs({ "Init", "Recalculate", "CalculateFromData", "GetStats" }) do
 	record(string.format("StatsService.%s", methodName), type(statsService[methodName]) == "function")
 end
@@ -5578,6 +6521,18 @@ for _, methodName in ipairs({ "Init", "IsInitialized", "ValidateLootTable", "Rol
 	record(string.format("LootService.%s", methodName), type(lootService[methodName]) == "function")
 end
 record("LootService.IsInitialized() false before Init", lootService.IsInitialized() == false)
+
+for _, methodName in ipairs({ "Init", "AddExperience", "GetProfessionData", "Gather", "Craft" }) do
+	record(string.format("ProfessionService.%s", methodName), type(professionService[methodName]) == "function")
+end
+
+for _, methodName in ipairs({ "Init", "CreateParty", "InvitePlayer", "AcceptInvite", "DeclineInvite", "LeaveParty", "KickMember", "DisbandParty", "GetParty", "GetPartyById", "IsLeader", "GetMembers" }) do
+	record(string.format("PartyService.%s", methodName), type(partyService[methodName]) == "function")
+end
+record("PartyService.GetParty(nil)", partyService.GetParty(nil) == nil)
+record("PartyService.GetPartyById unknown", partyService.GetPartyById("__ghost__") == nil)
+record("PartyService.IsLeader(nil)", partyService.IsLeader(nil) == false)
+record("PartyService.GetMembers unknown", partyService.GetMembers("__ghost__") == nil)
 
 
 for _, className in ipairs({ "Warrior", "Paladin", "Mage", "Priest", "Rogue", "Hunter" }) do
@@ -5656,6 +6611,38 @@ record("data.Level not mutated", warriorTank.Level == originalLevel)
 record("data.Stats.Resource not mutated", warriorTank.Stats.Resource == originalResource)
 record("cooldownState not mutated", cdSnapshot.WARRIOR_TAUNT == originalCooldown)
 
+local professionData = { Professions = { Mining = { Level = 1, XP = 0 }, Alchemy = { Level = 1, XP = 0 } } }
+record("ProfessionValidator accepts Mining", professionValidator.IsValidProfession("Mining").success)
+record("ProfessionValidator rejects Fishing", not professionValidator.IsValidProfession("Fishing").success)
+record("ProfessionValidator CanGainExperience succeeds", professionValidator.CanGainExperience(professionData, "Mining", 25).success)
+record("ProfessionValidator rejects negative profession XP", not professionValidator.CanGainExperience(professionData, "Mining", -5).success)
+record("ProfessionValidator CanGather copper_ore succeeds", professionValidator.CanGather(professionData, "Mining", "copper_ore").success)
+record("ProfessionValidator rejects unknown material", not professionValidator.CanGather(professionData, "Mining", "phantom_material").success)
+record("ProfessionValidator CanCraft health_potion succeeds", professionValidator.CanCraft(professionData, "Alchemy", "health_potion").success)
+record("ProfessionValidator rejects low-level mana_potion", not professionValidator.CanCraft(professionData, "Alchemy", "mana_potion").success)
+record("ProfessionValidator rejects wrong-profession recipe", not professionValidator.CanCraft(professionData, "Mining", "health_potion").success)
+
+
+local fakeLeader = { Name = "Leader" }
+local fakeTarget = { Name = "Target" }
+local fakeThird = { Name = "Third" }
+local fakeParty = { id = "party_test", leader = fakeLeader, members = { fakeLeader } }
+local now = os.clock()
+record("PartyValidator creates party for free leader", partyValidator.ValidateCreateParty(fakeLeader, {}).ok)
+record("PartyValidator rejects duplicate party membership", not partyValidator.ValidateCreateParty(fakeLeader, { [fakeLeader] = "party_test" }).ok)
+record("PartyValidator rejects self invite", partyValidator.ValidateInvite(fakeLeader, fakeLeader, fakeParty, { [fakeLeader] = "party_test" }, {}, now).code == "INVITE_TO_SELF")
+record("PartyValidator accepts valid invite", partyValidator.ValidateInvite(fakeLeader, fakeTarget, fakeParty, { [fakeLeader] = "party_test" }, {}, now).ok)
+record("PartyValidator rejects pending invite", partyValidator.ValidateInvite(fakeLeader, fakeTarget, fakeParty, { [fakeLeader] = "party_test" }, { [fakeTarget] = { party_test = now + 30 } }, now).code == "INVITE_PENDING")
+record("PartyValidator accepts invite after expiry", partyValidator.ValidateInvite(fakeLeader, fakeTarget, fakeParty, { [fakeLeader] = "party_test" }, { [fakeTarget] = { party_test = now - 1 } }, now).ok)
+record("PartyValidator accepts valid invite acceptance", partyValidator.ValidateAccept(fakeTarget, "party_test", fakeParty, {}, { [fakeTarget] = { party_test = now + 30 } }, now).ok)
+record("PartyValidator rejects expired invite acceptance", partyValidator.ValidateAccept(fakeTarget, "party_test", fakeParty, {}, { [fakeTarget] = { party_test = now - 1 } }, now).code == "INVITE_NOT_FOUND")
+record("PartyValidator accepts decline with pending invite", partyValidator.ValidateDecline(fakeTarget, "party_test", { [fakeTarget] = { party_test = now + 30 } }).ok)
+record("PartyValidator rejects missing decline invite", partyValidator.ValidateDecline(fakeTarget, "party_test", {}).code == "INVITE_NOT_FOUND")
+record("PartyValidator accepts member leave", partyValidator.ValidateLeave(fakeLeader, fakeParty).ok)
+record("PartyValidator rejects leave without party", partyValidator.ValidateLeave(fakeLeader, nil).code == "NOT_IN_PARTY")
+record("PartyValidator rejects self kick", partyValidator.ValidateKick(fakeLeader, fakeLeader, fakeParty).code == "KICK_SELF")
+record("PartyValidator rejects non-member kick", partyValidator.ValidateKick(fakeLeader, fakeThird, fakeParty).code == "KICK_NOT_MEMBER")
+
 local validLootTable = { { itemId = "item_health_potion", minAmount = 1, maxAmount = 2, chance = 1 } }
 local validLootSnapshot = validLootTable[1].minAmount
 record("LootService validates known item loot table", lootService.ValidateLootTable(validLootTable).success)
@@ -5723,6 +6710,12 @@ if okData and type(data) == "table" then
 	record("PlayerData default has CurrentHealth", type(data.CurrentHealth) == "number")
 	record("PlayerData default has CurrentResource", type(data.CurrentResource) == "number")
 	record("PlayerData default has ResourceType", type(data.ResourceType) == "string")
+	record("PlayerData default has Mining profession", type(data.Professions.Mining) == "table")
+	record("PlayerData default Mining.Level is number", type(data.Professions.Mining.Level) == "number")
+	record("PlayerData default Mining.XP is number", type(data.Professions.Mining.XP) == "number")
+	record("PlayerData default has Alchemy profession", type(data.Professions.Alchemy) == "table")
+	record("PlayerData default Alchemy.Level is number", type(data.Professions.Alchemy.Level) == "number")
+	record("PlayerData default Alchemy.XP is number", type(data.Professions.Alchemy.XP) == "number")
 else
 	record("PlayerDataConfig.DeepCopyDefault", false, "failed or returned non-table")
 end
@@ -5777,6 +6770,8 @@ local StatsService = require(Services:WaitForChild("StatsService"))
 local CombatService = require(Services:WaitForChild("CombatService"))
 local ClassService = require(Services:WaitForChild("ClassService"))
 local InventoryService = require(Services:WaitForChild("InventoryService"))
+local ProfessionService = require(Services:WaitForChild("ProfessionService"))
+local PartyService = require(Services:WaitForChild("PartyService"))
 local LootService = require(Services:WaitForChild("LootService"))
 local QuestService = require(Services:WaitForChild("QuestService"))
 local MobService = require(Services:WaitForChild("MobService"))
@@ -5786,6 +6781,8 @@ StatsService.Init(PlayerDataService)
 CombatService.Init(PlayerDataService, StatsService)
 ClassService.Init(PlayerDataService, StatsService)
 InventoryService.Init(PlayerDataService)
+ProfessionService.Init(PlayerDataService, InventoryService)
+PartyService.Init(PlayerDataService)
 LootService.Init(InventoryService)
 QuestService.Init(PlayerDataService, InventoryService)
 MobService.Init(PlayerDataService, QuestService, InventoryService, LootService)
