@@ -3857,6 +3857,141 @@ return PartyValidator
 						<UniqueId name="UniqueId">a03ea2146e650ae2f307ce8af2c27c81</UniqueId>
 					</Properties>
 				</Item>
+
+				<Item class="ModuleScript" referent="RBXBA84E0839C19F68C78B2B14BDC7ACE36">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">DungeonValidator</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Pure validation for GhostyRPG dungeon run creation.
+-- The service owns mutation; this module only checks request shape and config limits.
+
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local DungeonConfig = require(ServerScriptService:WaitForChild("Server"):WaitForChild("Config"):WaitForChild("DungeonConfig"))
+
+local DungeonValidator = {}
+
+export type ValidationResult = {
+	success: boolean,
+	reason: string?,
+	objectives: { string }?,
+}
+
+local function ok(payload: { string }?): ValidationResult
+	return { success = true, objectives = payload or {} }
+end
+
+local function fail(reason: string): ValidationResult
+	return { success = false, reason = reason }
+end
+
+local function isPlayer(value: any): boolean
+	return typeof(value) == "Instance" and value:IsA("Player")
+end
+
+local function getDungeonDefinition(dungeonId: string): any?
+	local dungeons = DungeonConfig.Dungeons
+	return if type(dungeons) == "table" then dungeons[dungeonId] else nil
+end
+
+local function getObjectiveIds(dungeonDef: any?): { string }
+	local objectiveIds = {}
+	if type(dungeonDef) ~= "table" or type(dungeonDef.Objectives) ~= "table" then
+		return objectiveIds
+	end
+	for _, objective in ipairs(dungeonDef.Objectives) do
+		if type(objective) == "string" then
+			table.insert(objectiveIds, objective)
+		elseif type(objective) == "table" and type(objective.id) == "string" then
+			table.insert(objectiveIds, objective.id)
+		elseif type(objective) == "table" and type(objective.Id) == "string" then
+			table.insert(objectiveIds, objective.Id)
+		end
+	end
+	return objectiveIds
+end
+
+function DungeonValidator.IsValidDifficulty(difficulty: string): boolean
+	return type(difficulty) == "string"
+		and type(DungeonConfig.DifficultyMultipliers) == "table"
+		and DungeonConfig.DifficultyMultipliers[difficulty] ~= nil
+end
+
+function DungeonValidator.ValidateRun(request: any): ValidationResult
+	if type(request) ~= "table" then
+		return fail("request must be a table.")
+	end
+	if type(request.dungeonId) ~= "string" or request.dungeonId == "" then
+		return fail("dungeonId must be a non-empty string.")
+	end
+	if not DungeonValidator.IsValidDifficulty(request.difficulty) then
+		return fail(string.format("Unknown dungeon difficulty '%s'.", tostring(request.difficulty)))
+	end
+	if not isPlayer(request.leader) then
+		return fail("leader must be a Player.")
+	end
+	if type(request.members) ~= "table" or #request.members == 0 then
+		return fail("members must contain at least one Player.")
+	end
+
+	local maxPlayers = DungeonConfig.MaxPlayers or math.huge
+	if #request.members > maxPlayers then
+		return fail(string.format("Dungeon party is too large (%d/%d).", #request.members, maxPlayers))
+	end
+
+	local leaderFound = false
+	local seen: { [Player]: boolean } = {}
+	for _, member in ipairs(request.members) do
+		if not isPlayer(member) then
+			return fail("members must contain only Player instances.")
+		end
+		if seen[member] then
+			return fail("members must not contain duplicate players.")
+		end
+		seen[member] = true
+		if member == request.leader then
+			leaderFound = true
+		end
+	end
+	if not leaderFound then
+		return fail("leader must be included in members.")
+	end
+
+	local dungeonDef = getDungeonDefinition(request.dungeonId)
+	if type(DungeonConfig.Dungeons) == "table" and dungeonDef == nil then
+		return fail(string.format("Unknown dungeon '%s'.", request.dungeonId))
+	end
+
+	return ok(getObjectiveIds(dungeonDef))
+end
+
+function DungeonValidator.GetRewards(dungeonId: string, difficulty: string): { any }
+	local dungeonDef = getDungeonDefinition(dungeonId)
+	if type(dungeonDef) ~= "table" then
+		return {}
+	end
+	local rewards = dungeonDef.Rewards
+	if type(rewards) ~= "table" then
+		return {}
+	end
+	local difficultyRewards = rewards[difficulty]
+	if type(difficultyRewards) == "table" then
+		return difficultyRewards
+	end
+	return rewards
+end
+
+return DungeonValidator
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">4b394206a37aa7696f6fd9a0c6212924</UniqueId>
+					</Properties>
+				</Item>
 </Item>
 			<Item class="Folder" referent="RBX1EC99083147E424890DB20CC53F1C3EF">
 				<Properties>
@@ -6386,6 +6521,400 @@ return PartyService
 						<UniqueId name="UniqueId">0ff9c98c6afd514d7c279571b693d13a</UniqueId>
 					</Properties>
 				</Item>
+
+				<Item class="ModuleScript" referent="RBX73B430BDA5D55A86435B313A4093866A">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">DungeonService</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Server-authoritative, in-memory lifecycle manager for GhostyRPG dungeon runs.
+-- This service tracks run state only; map loading, teleporting, spawning, and finder UI live elsewhere.
+
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local DungeonValidator = require(ServerScriptService:WaitForChild("Server"):WaitForChild("Validators"):WaitForChild("DungeonValidator"))
+
+local DungeonService = {}
+
+type RunData = {
+	runId: string,
+	dungeonId: string,
+	difficulty: string,
+	members: { Player },
+	leaderUserId: number,
+	status: string,
+	startedAt: number?,
+	objectives: { [string]: boolean },
+	failReason: string?,
+}
+
+local runs: { [string]: RunData } = {}
+local playerRunIndex: { [number]: string } = {}
+
+local playerDataService: any = nil
+local partyService: any = nil
+local questService: any = nil
+local inventoryService: any = nil
+local initialized = false
+
+local function generateRunId(): string
+	return "RUN_" .. HttpService:GenerateGUID(false)
+end
+
+local function safeCall(label: string, callback: () -> ())
+	local ok, err = pcall(callback)
+	if not ok then
+		warn(string.format("[DungeonService] %s failed: %s", label, tostring(err)))
+	end
+end
+
+local function copyMembers(members: { Player }): { Player }
+	local copy = {}
+	for index, member in ipairs(members) do
+		copy[index] = member
+	end
+	return copy
+end
+
+local function copyObjectives(objectives: { [string]: boolean }): { [string]: boolean }
+	local copy = {}
+	for objectiveId, completed in pairs(objectives) do
+		copy[objectiveId] = completed
+	end
+	return copy
+end
+
+local function snapshotRun(run: RunData): RunData
+	return {
+		runId = run.runId,
+		dungeonId = run.dungeonId,
+		difficulty = run.difficulty,
+		members = copyMembers(run.members),
+		leaderUserId = run.leaderUserId,
+		status = run.status,
+		startedAt = run.startedAt,
+		objectives = copyObjectives(run.objectives),
+		failReason = run.failReason,
+	}
+end
+
+local function indexMembers(runId: string, members: { Player })
+	for _, member in ipairs(members) do
+		playerRunIndex[member.UserId] = runId
+	end
+end
+
+local function deindexMembers(members: { Player })
+	for _, member in ipairs(members) do
+		playerRunIndex[member.UserId] = nil
+	end
+end
+
+local function scheduleEviction(runId: string, run: RunData)
+	task.delay(5, function()
+		if runs[runId] == run and (run.status == "Completed" or run.status == "Failed") then
+			runs[runId] = nil
+		end
+	end)
+end
+
+local function getPartyMembers(leader: Player): { Player }
+	if partyService and type(partyService.GetPartyMembers) == "function" then
+		local members = partyService.GetPartyMembers(leader)
+		if type(members) == "table" and #members > 0 then
+			return copyMembers(members)
+		end
+	end
+
+	if partyService and type(partyService.GetParty) == "function" then
+		local party = partyService.GetParty(leader)
+		if type(party) == "table" then
+			if type(party.members) == "table" and #party.members > 0 then
+				return copyMembers(party.members)
+			end
+			if type(party.id) == "string" and type(partyService.GetMembers) == "function" then
+				local members = partyService.GetMembers(party.id)
+				if type(members) == "table" and #members > 0 then
+					return copyMembers(members)
+				end
+			end
+		end
+	end
+
+	return { leader }
+end
+
+local function buildObjectives(objectiveIds: { string }?): { [string]: boolean }
+	local objectives = {}
+	for _, objectiveId in ipairs(objectiveIds or {}) do
+		objectives[objectiveId] = false
+	end
+	return objectives
+end
+
+local function applyDungeonProgress(run: RunData)
+	if not playerDataService then
+		return
+	end
+	for _, member in ipairs(run.members) do
+		safeCall("PlayerDataService.UpdateData", function()
+			if type(playerDataService.UpdateDungeonProgress) == "function" then
+				playerDataService.UpdateDungeonProgress(member, run.dungeonId, run.difficulty)
+			elseif type(playerDataService.UpdateData) == "function" then
+				playerDataService.UpdateData(member, function(data)
+					data.DungeonProgress = data.DungeonProgress or {}
+					local dungeonProgress = data.DungeonProgress[run.dungeonId]
+					if type(dungeonProgress) ~= "table" then
+						dungeonProgress = {}
+						data.DungeonProgress[run.dungeonId] = dungeonProgress
+					end
+					local difficultyProgress = dungeonProgress[run.difficulty]
+					if type(difficultyProgress) ~= "table" then
+						difficultyProgress = { completions = 0, bestTime = nil, lastCompletedAt = nil }
+						dungeonProgress[run.difficulty] = difficultyProgress
+					end
+					difficultyProgress.completions = (difficultyProgress.completions or 0) + 1
+					difficultyProgress.lastCompletedAt = os.time()
+					if run.startedAt then
+						local elapsed = math.max(0, os.time() - run.startedAt)
+						if difficultyProgress.bestTime == nil or elapsed < difficultyProgress.bestTime then
+							difficultyProgress.bestTime = elapsed
+						end
+					end
+				end)
+			end
+		end)
+	end
+end
+
+local function notifyQuestExplore(run: RunData)
+	if not questService or type(questService.NotifyExplore) ~= "function" then
+		return
+	end
+	for _, member in ipairs(run.members) do
+		safeCall("QuestService.NotifyExplore", function()
+			questService.NotifyExplore(member, run.dungeonId)
+		end)
+	end
+end
+
+local function grantRewards(run: RunData)
+	if not inventoryService or type(inventoryService.AddItem) ~= "function" then
+		return
+	end
+	local rewards = DungeonValidator.GetRewards(run.dungeonId, run.difficulty)
+	if type(rewards) ~= "table" then
+		return
+	end
+	for _, member in ipairs(run.members) do
+		for _, reward in ipairs(rewards) do
+			local itemId = reward.itemId or reward.ItemId
+			local amount = reward.amount or reward.quantity or reward.Amount or 1
+			if type(itemId) == "string" and type(amount) == "number" and amount > 0 then
+				safeCall("InventoryService.AddItem", function()
+					inventoryService.AddItem(member, itemId, amount)
+				end)
+			end
+		end
+	end
+end
+
+function DungeonService.Init(newPlayerDataService: any, newPartyService: any, newQuestService: any, newInventoryService: any)
+	if initialized then
+		warn("[DungeonService] Init called more than once; ignoring duplicate call.")
+		return
+	end
+	assert(newPlayerDataService, "DungeonService.Init requires PlayerDataService.")
+	assert(newPartyService, "DungeonService.Init requires PartyService.")
+	assert(newQuestService, "DungeonService.Init requires QuestService.")
+	assert(newInventoryService, "DungeonService.Init requires InventoryService.")
+
+	playerDataService = newPlayerDataService
+	partyService = newPartyService
+	questService = newQuestService
+	inventoryService = newInventoryService
+	initialized = true
+
+	Players.PlayerRemoving:Connect(function(player)
+		if playerRunIndex[player.UserId] then
+			DungeonService.AbandonRun(player)
+		end
+	end)
+
+	print("[DungeonService] Initialized.")
+end
+
+function DungeonService.CreateRun(leaderPlayer: Player, dungeonId: string, difficulty: string): (string?, string?)
+	assert(typeof(leaderPlayer) == "Instance" and leaderPlayer:IsA("Player"), "DungeonService.CreateRun requires leaderPlayer to be a Player.")
+	assert(type(dungeonId) == "string" and dungeonId ~= "", "DungeonService.CreateRun requires dungeonId.")
+	assert(type(difficulty) == "string" and difficulty ~= "", "DungeonService.CreateRun requires difficulty.")
+
+	if playerRunIndex[leaderPlayer.UserId] then
+		return nil, "Leader is already in a dungeon run."
+	end
+
+	local members = getPartyMembers(leaderPlayer)
+	for _, member in ipairs(members) do
+		if playerRunIndex[member.UserId] then
+			return nil, string.format("Party member %s is already in a dungeon run.", member.Name)
+		end
+	end
+
+	local validation = DungeonValidator.ValidateRun({
+		dungeonId = dungeonId,
+		difficulty = difficulty,
+		members = members,
+		leader = leaderPlayer,
+	})
+	if not validation.success then
+		return nil, validation.reason or "Dungeon validation failed."
+	end
+
+	local runId = generateRunId()
+	local run: RunData = {
+		runId = runId,
+		dungeonId = dungeonId,
+		difficulty = difficulty,
+		members = members,
+		leaderUserId = leaderPlayer.UserId,
+		status = "Waiting",
+		startedAt = nil,
+		objectives = buildObjectives(validation.objectives),
+		failReason = nil,
+	}
+	runs[runId] = run
+	indexMembers(runId, members)
+
+	return runId, nil
+end
+
+function DungeonService.StartRun(runId: string): (boolean, string?)
+	local run = runs[runId]
+	if not run then
+		return false, "Run not found: " .. tostring(runId)
+	end
+	if run.status ~= "Waiting" then
+		return false, string.format("Run %s cannot be started (status=%s).", runId, run.status)
+	end
+	run.status = "Active"
+	run.startedAt = os.time()
+	return true, nil
+end
+
+function DungeonService.CompleteObjective(runId: string, objectiveId: string): (boolean, string?)
+	local run = runs[runId]
+	if not run then
+		return false, "Run not found: " .. tostring(runId)
+	end
+	if run.status ~= "Active" then
+		return false, string.format("Run %s is not active (status=%s).", runId, run.status)
+	end
+	if run.objectives[objectiveId] == nil then
+		return false, string.format("Objective '%s' is not registered for run %s.", tostring(objectiveId), runId)
+	end
+	if run.objectives[objectiveId] then
+		return false, string.format("Objective '%s' is already completed.", tostring(objectiveId))
+	end
+	run.objectives[objectiveId] = true
+	return true, nil
+end
+
+function DungeonService.CompleteRun(runId: string): (boolean, string?)
+	local run = runs[runId]
+	if not run then
+		return false, "Run not found: " .. tostring(runId)
+	end
+	if run.status ~= "Active" then
+		return false, string.format("Run %s cannot be completed (status=%s).", runId, run.status)
+	end
+
+	run.status = "Completed"
+	applyDungeonProgress(run)
+	notifyQuestExplore(run)
+	grantRewards(run)
+	deindexMembers(run.members)
+	scheduleEviction(runId, run)
+	return true, nil
+end
+
+function DungeonService.FailRun(runId: string, reason: string?): (boolean, string?)
+	local run = runs[runId]
+	if not run then
+		return false, "Run not found: " .. tostring(runId)
+	end
+	if run.status == "Completed" or run.status == "Failed" then
+		return false, string.format("Run %s is already terminal (status=%s).", runId, run.status)
+	end
+	run.status = "Failed"
+	run.failReason = reason or "Unknown reason"
+	deindexMembers(run.members)
+	scheduleEviction(runId, run)
+	return true, nil
+end
+
+function DungeonService.GetRun(runId: string): RunData?
+	local run = runs[runId]
+	return if run then snapshotRun(run) else nil
+end
+
+function DungeonService.GetPlayerRun(player: Player): RunData?
+	assert(typeof(player) == "Instance" and player:IsA("Player"), "DungeonService.GetPlayerRun requires a Player.")
+	local runId = playerRunIndex[player.UserId]
+	return if runId then DungeonService.GetRun(runId) else nil
+end
+
+function DungeonService.AbandonRun(player: Player): (boolean, string?)
+	assert(typeof(player) == "Instance" and player:IsA("Player"), "DungeonService.AbandonRun requires a Player.")
+	local runId = playerRunIndex[player.UserId]
+	if not runId then
+		return false, "Player is not in any dungeon run."
+	end
+	local run = runs[runId]
+	if not run then
+		playerRunIndex[player.UserId] = nil
+		return false, "Run record missing; stale index cleaned up."
+	end
+	if run.status == "Completed" or run.status == "Failed" then
+		playerRunIndex[player.UserId] = nil
+		return true, nil
+	end
+	if player.UserId == run.leaderUserId then
+		return DungeonService.FailRun(runId, string.format("Leader (%s) abandoned the run.", player.Name))
+	end
+
+	playerRunIndex[player.UserId] = nil
+	for index, member in ipairs(run.members) do
+		if member.UserId == player.UserId then
+			table.remove(run.members, index)
+			break
+		end
+	end
+	if #run.members == 0 then
+		return DungeonService.FailRun(runId, "All members left the dungeon.")
+	end
+	return true, nil
+end
+
+function DungeonService._GetState()
+	return {
+		runs = runs,
+		playerRunIndex = playerRunIndex,
+		initialized = initialized,
+	}
+end
+
+return DungeonService
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">b8183c374862bb5fb0627220d112163d</UniqueId>
+					</Properties>
+				</Item>
 </Item>
 			<Item class="Script" referent="RBXDE5EC164C1F244C3B1632F260C99FC90">
 				<Properties>
@@ -6447,6 +6976,7 @@ local abilityValidator = require(Validators:WaitForChild("AbilityValidator") :: 
 local classValidator = require(Validators:WaitForChild("ClassValidator") :: ModuleScript)
 local professionValidator = require(Validators:WaitForChild("ProfessionValidator") :: ModuleScript)
 local partyValidator = require(Validators:WaitForChild("PartyValidator") :: ModuleScript)
+local dungeonValidator = require(Validators:WaitForChild("DungeonValidator") :: ModuleScript)
 local playerDataService = require(Server:WaitForChild("Services"):WaitForChild("PlayerDataService") :: ModuleScript)
 local inventoryService = require(Server:WaitForChild("Services"):WaitForChild("InventoryService") :: ModuleScript)
 local statsService = require(Server:WaitForChild("Services"):WaitForChild("StatsService") :: ModuleScript)
@@ -6454,6 +6984,7 @@ local combatService = require(Server:WaitForChild("Services"):WaitForChild("Comb
 local lootService = require(Server:WaitForChild("Services"):WaitForChild("LootService") :: ModuleScript)
 local professionService = require(Server:WaitForChild("Services"):WaitForChild("ProfessionService") :: ModuleScript)
 local partyService = require(Server:WaitForChild("Services"):WaitForChild("PartyService") :: ModuleScript)
+local dungeonService = require(Server:WaitForChild("Services"):WaitForChild("DungeonService") :: ModuleScript)
 local mobService = require(Server:WaitForChild("Services"):WaitForChild("MobService") :: ModuleScript)
 local classService = require(Server:WaitForChild("Services"):WaitForChild("ClassService") :: ModuleScript)
 require(Server:WaitForChild("Services"):WaitForChild("QuestService") :: ModuleScript)
@@ -6500,6 +7031,12 @@ end
 record("PartyValidator.MAX_PARTY_SIZE", partyValidator.MAX_PARTY_SIZE == 5)
 record("PartyValidator.INVITE_EXPIRE_SECONDS", partyValidator.INVITE_EXPIRE_SECONDS == 60)
 
+for _, methodName in ipairs({ "IsValidDifficulty", "ValidateRun", "GetRewards" }) do
+	record(string.format("DungeonValidator.%s", methodName), type(dungeonValidator[methodName]) == "function")
+end
+record("DungeonValidator accepts Normal difficulty", dungeonValidator.IsValidDifficulty("Normal"))
+record("DungeonValidator rejects invalid difficulty", not dungeonValidator.IsValidDifficulty("Impossible"))
+
 for _, methodName in ipairs({ "Init", "Recalculate", "CalculateFromData", "GetStats" }) do
 	record(string.format("StatsService.%s", methodName), type(statsService[methodName]) == "function")
 end
@@ -6533,6 +7070,17 @@ record("PartyService.GetParty(nil)", partyService.GetParty(nil) == nil)
 record("PartyService.GetPartyById unknown", partyService.GetPartyById("__ghost__") == nil)
 record("PartyService.IsLeader(nil)", partyService.IsLeader(nil) == false)
 record("PartyService.GetMembers unknown", partyService.GetMembers("__ghost__") == nil)
+
+for _, methodName in ipairs({ "Init", "CreateRun", "StartRun", "CompleteObjective", "CompleteRun", "FailRun", "GetRun", "GetPlayerRun", "AbandonRun" }) do
+	record(string.format("DungeonService.%s", methodName), type(dungeonService[methodName]) == "function")
+end
+record("DungeonService.GetRun unknown", dungeonService.GetRun("__ghost_run__") == nil)
+local failRunOk, failRunSuccess = pcall(dungeonService.FailRun, "__ghost_run__", "smoke")
+record("DungeonService.FailRun unknown returns false", failRunOk and failRunSuccess == false)
+local getPlayerRunOk = pcall(dungeonService.GetPlayerRun, nil)
+record("DungeonService.GetPlayerRun nil errors", not getPlayerRunOk)
+local abandonRunOk = pcall(dungeonService.AbandonRun, nil)
+record("DungeonService.AbandonRun nil errors", not abandonRunOk)
 
 
 for _, className in ipairs({ "Warrior", "Paladin", "Mage", "Priest", "Rogue", "Hunter" }) do
@@ -6772,6 +7320,7 @@ local ClassService = require(Services:WaitForChild("ClassService"))
 local InventoryService = require(Services:WaitForChild("InventoryService"))
 local ProfessionService = require(Services:WaitForChild("ProfessionService"))
 local PartyService = require(Services:WaitForChild("PartyService"))
+local DungeonService = require(Services:WaitForChild("DungeonService"))
 local LootService = require(Services:WaitForChild("LootService"))
 local QuestService = require(Services:WaitForChild("QuestService"))
 local MobService = require(Services:WaitForChild("MobService"))
@@ -6785,6 +7334,7 @@ ProfessionService.Init(PlayerDataService, InventoryService)
 PartyService.Init(PlayerDataService)
 LootService.Init(InventoryService)
 QuestService.Init(PlayerDataService, InventoryService)
+DungeonService.Init(PlayerDataService, PartyService, QuestService, InventoryService)
 MobService.Init(PlayerDataService, QuestService, InventoryService, LootService)
 
 local function onPlayerAdded(player: Player)
