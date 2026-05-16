@@ -1962,6 +1962,133 @@ return PlayerDataConfig
 					</Properties>
 				</Item>
 
+				<Item class="ModuleScript" referent="RBX914848D088C841E59F56BD7A182399FC">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">ItemConfig</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Public item catalog for GhostyRPG. Safe to require on client and server.
+-- Contains item metadata only; drop rates and reward rules stay server-side.
+
+local ItemConfig = {}
+
+ItemConfig.ItemType = {
+	Consumable = "Consumable",
+	Material = "Material",
+	Weapon = "Weapon",
+	Armor = "Armor",
+	Trinket = "Trinket",
+	Quest = "Quest",
+	Currency = "Currency",
+}
+
+ItemConfig.Rarity = {
+	Common = "Common",
+	Uncommon = "Uncommon",
+	Rare = "Rare",
+	Epic = "Epic",
+	Legendary = "Legendary",
+	Artifact = "Artifact",
+}
+
+ItemConfig.EquipmentSlot = {
+	Head = "Head",
+	Shoulders = "Shoulders",
+	Chest = "Chest",
+	Legs = "Legs",
+	Feet = "Feet",
+	Hands = "Hands",
+	Waist = "Waist",
+	Wrist = "Wrist",
+	Back = "Back",
+	MainHand = "MainHand",
+	OffHand = "OffHand",
+	Ranged = "Ranged",
+	Necklace = "Necklace",
+	Ring1 = "Ring1",
+	Ring2 = "Ring2",
+	Trinket1 = "Trinket1",
+	Trinket2 = "Trinket2",
+}
+
+export type ItemDef = {
+	itemId: string,
+	name: string,
+	description: string,
+	itemType: string,
+	rarity: string,
+	stackable: boolean,
+	maxStack: number,
+	tradable: boolean,
+	bindOnPickup: boolean,
+	vendorPrice: number,
+	requiredLevel: number,
+	itemLevel: number,
+	equipSlot: string?,
+	statBonuses: { [string]: number }?,
+}
+
+local CATALOG: { [string]: ItemDef } = {
+	item_health_potion = { itemId = "item_health_potion", name = "Health Potion", description = "Restores a modest amount of health.", itemType = "Consumable", rarity = "Common", stackable = true, maxStack = 99, tradable = true, bindOnPickup = false, vendorPrice = 10, requiredLevel = 1, itemLevel = 1, equipSlot = nil, statBonuses = nil },
+	item_mana_potion = { itemId = "item_mana_potion", name = "Mana Potion", description = "Restores a modest amount of mana or class resource.", itemType = "Consumable", rarity = "Common", stackable = true, maxStack = 99, tradable = true, bindOnPickup = false, vendorPrice = 10, requiredLevel = 1, itemLevel = 1, equipSlot = nil, statBonuses = nil },
+	item_mistleaf = { itemId = "item_mistleaf", name = "Mistleaf", description = "A pale herb gathered from fog-soaked groves.", itemType = "Material", rarity = "Common", stackable = true, maxStack = 200, tradable = true, bindOnPickup = false, vendorPrice = 3, requiredLevel = 1, itemLevel = 1, equipSlot = nil, statBonuses = nil },
+	item_bone_fragment = { itemId = "item_bone_fragment", name = "Bone Fragment", description = "Brittle remains from restless undead.", itemType = "Material", rarity = "Common", stackable = true, maxStack = 200, tradable = true, bindOnPickup = false, vendorPrice = 2, requiredLevel = 1, itemLevel = 1, equipSlot = nil, statBonuses = nil },
+	copper_ore = { itemId = "copper_ore", name = "Copper Ore", description = "Rough ore used by beginner miners and smiths.", itemType = "Material", rarity = "Common", stackable = true, maxStack = 200, tradable = true, bindOnPickup = false, vendorPrice = 5, requiredLevel = 1, itemLevel = 1, equipSlot = nil, statBonuses = nil },
+	empty_vial = { itemId = "empty_vial", name = "Empty Vial", description = "A simple vial used in alchemy recipes.", itemType = "Material", rarity = "Common", stackable = true, maxStack = 50, tradable = true, bindOnPickup = false, vendorPrice = 2, requiredLevel = 1, itemLevel = 1, equipSlot = nil, statBonuses = nil },
+
+	item_goblin_dagger = { itemId = "item_goblin_dagger", name = "Grave Goblin Dagger", description = "A crude but sharp dagger chipped from grave-flint.", itemType = "Weapon", rarity = "Common", stackable = false, maxStack = 1, tradable = true, bindOnPickup = false, vendorPrice = 25, requiredLevel = 1, itemLevel = 2, equipSlot = "MainHand", statBonuses = { AttackPower = 4, Agility = 1 } },
+	starter_sword = { itemId = "starter_sword", name = "Starter Sword", description = "A reliable blade issued to new adventurers.", itemType = "Weapon", rarity = "Common", stackable = false, maxStack = 1, tradable = false, bindOnPickup = true, vendorPrice = 0, requiredLevel = 1, itemLevel = 1, equipSlot = "MainHand", statBonuses = { AttackPower = 3 } },
+	starter_staff = { itemId = "starter_staff", name = "Starter Staff", description = "A spirit-carved staff for novice casters and healers.", itemType = "Weapon", rarity = "Common", stackable = false, maxStack = 1, tradable = false, bindOnPickup = true, vendorPrice = 0, requiredLevel = 1, itemLevel = 1, equipSlot = "MainHand", statBonuses = { SpellPower = 3, Intellect = 1 } },
+	starter_shield = { itemId = "starter_shield", name = "Starter Shield", description = "A battered wooden buckler for new tanks.", itemType = "Armor", rarity = "Common", stackable = false, maxStack = 1, tradable = false, bindOnPickup = true, vendorPrice = 0, requiredLevel = 1, itemLevel = 1, equipSlot = "OffHand", statBonuses = { Armor = 8, Stamina = 1 } },
+	item_iron_guard_vest = { itemId = "item_iron_guard_vest", name = "Iron Guard Vest", description = "Dented iron plating once worn by a crypt guard.", itemType = "Armor", rarity = "Uncommon", stackable = false, maxStack = 1, tradable = true, bindOnPickup = false, vendorPrice = 80, requiredLevel = 3, itemLevel = 5, equipSlot = "Chest", statBonuses = { Armor = 30, Stamina = 3 } },
+	item_crypt_key = { itemId = "item_crypt_key", name = "Crypt Key", description = "A cold iron key etched with a warning not to open the crypt at night.", itemType = "Quest", rarity = "Common", stackable = false, maxStack = 1, tradable = false, bindOnPickup = true, vendorPrice = 0, requiredLevel = 1, itemLevel = 1, equipSlot = nil, statBonuses = nil },
+}
+
+function ItemConfig.GetItem(itemId: string): ItemDef?
+	return CATALOG[itemId]
+end
+
+function ItemConfig.IsValidItem(itemId: string): boolean
+	return CATALOG[itemId] ~= nil
+end
+
+function ItemConfig.IsStackable(itemId: string): boolean
+	local item = CATALOG[itemId]
+	return item ~= nil and item.stackable
+end
+
+function ItemConfig.GetMaxStack(itemId: string): number
+	local item = CATALOG[itemId]
+	if not item then
+		return 1
+	end
+	return math.max(1, item.maxStack)
+end
+
+function ItemConfig.CanEquip(itemId: string): boolean
+	local item = CATALOG[itemId]
+	return item ~= nil and item.equipSlot ~= nil
+end
+
+function ItemConfig.GetEquipmentSlot(itemId: string): string?
+	local item = CATALOG[itemId]
+	if not item then
+		return nil
+	end
+	return item.equipSlot
+end
+
+return ItemConfig
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">4e01baa15b804f86a3f9ece818927850</UniqueId>
+					</Properties>
+				</Item>
+
 		</Item>
 
 			<Item class="Folder" referent="RBXB79FC56241904A1786560ACE6167794B">
@@ -2250,17 +2377,15 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local sharedConfig = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config")
 local serverConfig = ServerScriptService:WaitForChild("Server"):WaitForChild("Config")
 
-local sharedModules = { "GameEnums", "ClassConfig", "RoleConfig", "StatFormulas" }
-local serverModules = { "ProfessionConfig", "DungeonConfig", "RaidConfig", "ArenaConfig" }
+local sharedModules = { "GameEnums", "ClassConfig", "RoleConfig", "StatFormulas", "QuestsConfig", "PlayerDataConfig", "ItemConfig" }
+local serverModules = { "ProfessionConfig", "DungeonConfig", "RaidConfig", "ArenaConfig", "QuestsServerConfig" }
 
 for _, moduleName in ipairs(sharedModules) do
-	local ok, result = pcall(require, sharedConfig:WaitForChild(moduleName))
-	assert(ok, string.format("Failed to load shared config %s: %s", moduleName, tostring(result)))
+	require(sharedConfig:WaitForChild(moduleName))
 end
 
 for _, moduleName in ipairs(serverModules) do
-	local ok, result = pcall(require, serverConfig:WaitForChild(moduleName))
-	assert(ok, string.format("Failed to load server config %s: %s", moduleName, tostring(result)))
+	require(serverConfig:WaitForChild(moduleName))
 end
 
 print(string.format("[GhostyRPG] Config smoke test loaded %d modules.", #sharedModules + #serverModules))
@@ -2495,6 +2620,152 @@ return QuestValidator
 						<UniqueId name="UniqueId">f076c9438dbb4452b9ef4f42fd1a0e53</UniqueId>
 					</Properties>
 				</Item>
+				<Item class="ModuleScript" referent="RBX46DB3F0A108043B988E99CDD0A553A2A">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">InventoryValidator</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Pure server-side validation for GhostyRPG inventory and equipment operations.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"):WaitForChild("ItemConfig"))
+
+local InventoryValidator = {}
+
+local MAX_INVENTORY_SLOTS = 100
+
+export type ValidationResult = {
+	success: boolean,
+	reason: string?,
+}
+
+local function ok(): ValidationResult
+	return { success = true, reason = nil }
+end
+
+local function fail(reason: string): ValidationResult
+	return { success = false, reason = reason }
+end
+
+local function isPositiveInteger(value: any): boolean
+	return type(value) == "number" and value >= 1 and value == math.floor(value)
+end
+
+local function countSlots(inventory: { [string]: any }): number
+	local count = 0
+	for _ in pairs(inventory) do
+		count += 1
+	end
+	return count
+end
+
+function InventoryValidator.CanAddItem(data: { [string]: any }, itemId: string, amount: number): ValidationResult
+	if typeof(itemId) ~= "string" or itemId == "" then
+		return fail("Invalid item id.")
+	end
+	if not ItemConfig.IsValidItem(itemId) then
+		return fail("Unknown item: " .. itemId)
+	end
+	if not isPositiveInteger(amount) then
+		return fail("Amount must be a positive integer.")
+	end
+
+	local inventory = data.Inventory or {}
+	local existing = inventory[itemId]
+	local currentAmount = if existing then (existing.amount or 0) else 0
+
+	if ItemConfig.IsStackable(itemId) then
+		local maxStack = ItemConfig.GetMaxStack(itemId)
+		if currentAmount + amount > maxStack then
+			return fail(string.format("Stack limit exceeded for %s (%d/%d).", itemId, currentAmount + amount, maxStack))
+		end
+	else
+		if amount ~= 1 then
+			return fail("Non-stackable items must be added one at a time.")
+		end
+		if currentAmount >= 1 then
+			return fail("Non-stackable item is already present: " .. itemId)
+		end
+	end
+
+	if not existing and countSlots(inventory) >= MAX_INVENTORY_SLOTS then
+		return fail(string.format("Inventory is full (%d slots).", MAX_INVENTORY_SLOTS))
+	end
+
+	return ok()
+end
+
+function InventoryValidator.CanRemoveItem(data: { [string]: any }, itemId: string, amount: number): ValidationResult
+	if typeof(itemId) ~= "string" or itemId == "" then
+		return fail("Invalid item id.")
+	end
+	if not ItemConfig.IsValidItem(itemId) then
+		return fail("Unknown item: " .. itemId)
+	end
+	if not isPositiveInteger(amount) then
+		return fail("Amount must be a positive integer.")
+	end
+
+	local inventory = data.Inventory or {}
+	local existing = inventory[itemId]
+	local currentAmount = if existing then (existing.amount or 0) else 0
+	if currentAmount < amount then
+		return fail(string.format("Not enough %s: have %d, need %d.", itemId, currentAmount, amount))
+	end
+
+	return ok()
+end
+
+function InventoryValidator.CanEquipItem(data: { [string]: any }, itemId: string): ValidationResult
+	if typeof(itemId) ~= "string" or itemId == "" then
+		return fail("Invalid item id.")
+	end
+	if not ItemConfig.IsValidItem(itemId) then
+		return fail("Unknown item: " .. itemId)
+	end
+	if not ItemConfig.CanEquip(itemId) then
+		return fail("Item is not equippable: " .. itemId)
+	end
+
+	local inventory = data.Inventory or {}
+	local existing = inventory[itemId]
+	if not existing or (existing.amount or 0) < 1 then
+		return fail("Item is not in inventory: " .. itemId)
+	end
+
+	local itemDef = ItemConfig.GetItem(itemId)
+	local requiredLevel = if itemDef then (itemDef.requiredLevel or 1) else 1
+	local playerLevel = data.Level or 1
+	if playerLevel < requiredLevel then
+		return fail(string.format("Level %d required to equip %s.", requiredLevel, itemId))
+	end
+
+	return ok()
+end
+
+function InventoryValidator.CanUnequipSlot(data: { [string]: any }, slotName: string): ValidationResult
+	if typeof(slotName) ~= "string" or slotName == "" then
+		return fail("Invalid equipment slot.")
+	end
+
+	local equipment = data.Equipment or {}
+	if not equipment[slotName] then
+		return fail("No item equipped in slot: " .. slotName)
+	end
+
+	return ok()
+end
+
+return InventoryValidator
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">4e00990e310340f18b8c077f569b26a0</UniqueId>
+					</Properties>
+				</Item>
 			</Item>
 			<Item class="Folder" referent="RBX1EC99083147E424890DB20CC53F1C3EF">
 				<Properties>
@@ -2540,12 +2811,13 @@ local QuestService = {}
 QuestService.QuestTurnedInSignal = questTurnedInBindable.Event
 
 local dataService: any = nil
+local inventoryService: any = nil
 local initialized = false
 local savePending: { [Player]: boolean } = {}
 
 local function getData(player: Player): { [string]: any }?
 	assert(dataService, "QuestService requires Init(dataService) before use.")
-	return dataService:GetData(player)
+	return dataService.GetData(player)
 end
 
 local function scheduleSave(player: Player)
@@ -2557,7 +2829,7 @@ local function scheduleSave(player: Player)
 	task.delay(5, function()
 		savePending[player] = nil
 		if player.Parent and dataService then
-			dataService:ScheduleSave(player)
+			dataService.ScheduleSave(player)
 		end
 	end)
 end
@@ -2608,7 +2880,11 @@ local function isAllObjectivesComplete(questId: string, activeEntry: { [string]:
 	return true
 end
 
-local function addInventoryItem(data: { [string]: any }, itemId: string, amount: number)
+local function addInventoryItem(player: Player, data: { [string]: any }, itemId: string, amount: number): boolean
+	if inventoryService then
+		return inventoryService.AddItem(player, itemId, amount)
+	end
+
 	data.Inventory = data.Inventory or {}
 	local inventory = data.Inventory
 	local entry = inventory[itemId]
@@ -2618,6 +2894,7 @@ local function addInventoryItem(data: { [string]: any }, itemId: string, amount:
 	else
 		inventory[itemId] = { itemId = itemId, amount = amount }
 	end
+	return true
 end
 
 local function distributeRewards(player: Player, questId: string, data: { [string]: any }): { [string]: any }
@@ -2633,8 +2910,9 @@ local function distributeRewards(player: Player, questId: string, data: { [strin
 	local rolledItems = {}
 	for _, itemReward in ipairs(reward.items) do
 		if math.random() <= itemReward.chance then
-			addInventoryItem(data, itemReward.itemId, itemReward.amount)
-			table.insert(rolledItems, { itemId = itemReward.itemId, amount = itemReward.amount })
+			if addInventoryItem(player, data, itemReward.itemId, itemReward.amount) then
+				table.insert(rolledItems, { itemId = itemReward.itemId, amount = itemReward.amount })
+			end
 		end
 	end
 
@@ -2847,10 +3125,10 @@ local function getActiveQuestList(player: Player): { any }
 	return result
 end
 
-function QuestService.Init(newDataService: any)
+function QuestService.Init(newDataService: any, newInventoryService: any?)
 	assert(newDataService, "QuestService.Init requires a DataService.")
 	assert(newDataService.GetData, "QuestService.Init requires dataService:GetData(player).")
-	assert(newDataService.ScheduleSave, "QuestService.Init requires dataService:ScheduleSave(player).")
+	assert(newDataService.ScheduleSave, "QuestService.Init requires dataService.ScheduleSave(player).")
 
 	if initialized then
 		warn("[QuestService] Init called more than once; ignoring duplicate call.")
@@ -2858,6 +3136,7 @@ function QuestService.Init(newDataService: any)
 	end
 
 	dataService = newDataService
+	inventoryService = newInventoryService
 	initialized = true
 
 	QuestRemotes.GetEvent("AcceptQuest").OnServerEvent:Connect(function(player: Player, questId: any)
@@ -3134,6 +3413,216 @@ return PlayerDataService
 						<UniqueId name="UniqueId">491ebe14ff8d4e9180578ebb5ccac5be</UniqueId>
 					</Properties>
 				</Item>
+				<Item class="ModuleScript" referent="RBXC635F5F1B2FD416D916D07C137BAC111">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">InventoryService</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Server-authoritative inventory and equipment operations for GhostyRPG.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"):WaitForChild("ItemConfig"))
+local InventoryValidator = require(script.Parent.Parent:WaitForChild("Validators"):WaitForChild("InventoryValidator"))
+
+local InventoryService = {}
+
+local playerDataService: any = nil
+local initialized = false
+
+local function assertInitialized()
+	assert(initialized and playerDataService, "InventoryService requires Init(playerDataService) before use.")
+end
+
+local function getData(player: Player): { [string]: any }?
+	assertInitialized()
+	return playerDataService.GetData(player)
+end
+
+local function scheduleSave(player: Player)
+	assertInitialized()
+	playerDataService.ScheduleSave(player)
+end
+
+local function ensureInventory(data: { [string]: any }): { [string]: any }
+	if not data.Inventory then
+		data.Inventory = {}
+	end
+	return data.Inventory
+end
+
+local function ensureEquipment(data: { [string]: any }): { [string]: any }
+	if not data.Equipment then
+		data.Equipment = {}
+	end
+	return data.Equipment
+end
+
+local function rawAddToInventory(inventory: { [string]: any }, itemId: string, amount: number, metadata: any?)
+	local entry = inventory[itemId]
+	if entry then
+		entry.amount = (entry.amount or 0) + amount
+	else
+		inventory[itemId] = { itemId = itemId, amount = amount, metadata = metadata }
+	end
+end
+
+function InventoryService.Init(newPlayerDataService: any)
+	if initialized then
+		warn("[InventoryService] Init called more than once; ignoring duplicate call.")
+		return
+	end
+
+	assert(newPlayerDataService, "InventoryService.Init requires PlayerDataService.")
+	assert(newPlayerDataService.GetData, "InventoryService.Init requires PlayerDataService.GetData.")
+	assert(newPlayerDataService.ScheduleSave, "InventoryService.Init requires PlayerDataService.ScheduleSave.")
+
+	playerDataService = newPlayerDataService
+	initialized = true
+	print("[InventoryService] Initialized.")
+end
+
+function InventoryService.AddItem(player: Player, itemId: string, amount: number?, metadata: any?): boolean
+	local itemAmount = amount or 1
+	local data = getData(player)
+	if not data then
+		warn(string.format("[InventoryService] AddItem failed for %s: data unavailable.", player.Name))
+		return false
+	end
+
+	local validation = InventoryValidator.CanAddItem(data, itemId, itemAmount)
+	if not validation.success then
+		warn(string.format("[InventoryService] AddItem rejected for %s: %s", player.Name, tostring(validation.reason)))
+		return false
+	end
+
+	rawAddToInventory(ensureInventory(data), itemId, itemAmount, metadata)
+	scheduleSave(player)
+	return true
+end
+
+function InventoryService.RemoveItem(player: Player, itemId: string, amount: number?): boolean
+	local itemAmount = amount or 1
+	local data = getData(player)
+	if not data then
+		warn(string.format("[InventoryService] RemoveItem failed for %s: data unavailable.", player.Name))
+		return false
+	end
+
+	local validation = InventoryValidator.CanRemoveItem(data, itemId, itemAmount)
+	if not validation.success then
+		warn(string.format("[InventoryService] RemoveItem rejected for %s: %s", player.Name, tostring(validation.reason)))
+		return false
+	end
+
+	local inventory = ensureInventory(data)
+	inventory[itemId].amount -= itemAmount
+	if inventory[itemId].amount <= 0 then
+		inventory[itemId] = nil
+	end
+
+	scheduleSave(player)
+	return true
+end
+
+function InventoryService.HasItem(player: Player, itemId: string, amount: number?): boolean
+	local itemAmount = amount or 1
+	local data = getData(player)
+	if not data then
+		return false
+	end
+
+	local entry = (data.Inventory or {})[itemId]
+	return entry ~= nil and (entry.amount or 0) >= itemAmount
+end
+
+function InventoryService.GetInventory(player: Player): { [string]: any }
+	local data = getData(player)
+	if not data then
+		return {}
+	end
+	return ensureInventory(data)
+end
+
+function InventoryService.GetEquipment(player: Player): { [string]: any }
+	local data = getData(player)
+	if not data then
+		return {}
+	end
+	return ensureEquipment(data)
+end
+
+function InventoryService.EquipItem(player: Player, itemId: string): boolean
+	local data = getData(player)
+	if not data then
+		warn(string.format("[InventoryService] EquipItem failed for %s: data unavailable.", player.Name))
+		return false
+	end
+
+	local validation = InventoryValidator.CanEquipItem(data, itemId)
+	if not validation.success then
+		warn(string.format("[InventoryService] EquipItem rejected for %s: %s", player.Name, tostring(validation.reason)))
+		return false
+	end
+
+	local slotName = ItemConfig.GetEquipmentSlot(itemId)
+	if not slotName then
+		return false
+	end
+
+	local inventory = ensureInventory(data)
+	local equipment = ensureEquipment(data)
+	local sourceEntry = inventory[itemId]
+	local metadata = sourceEntry and sourceEntry.metadata or nil
+	local displaced = equipment[slotName]
+
+	if displaced then
+		rawAddToInventory(inventory, displaced.itemId, 1, displaced.metadata)
+	end
+
+	inventory[itemId].amount -= 1
+	if inventory[itemId].amount <= 0 then
+		inventory[itemId] = nil
+	end
+
+	equipment[slotName] = { itemId = itemId, amount = 1, metadata = metadata }
+	scheduleSave(player)
+	return true
+end
+
+function InventoryService.UnequipSlot(player: Player, slotName: string): boolean
+	local data = getData(player)
+	if not data then
+		warn(string.format("[InventoryService] UnequipSlot failed for %s: data unavailable.", player.Name))
+		return false
+	end
+
+	local validation = InventoryValidator.CanUnequipSlot(data, slotName)
+	if not validation.success then
+		warn(string.format("[InventoryService] UnequipSlot rejected for %s: %s", player.Name, tostring(validation.reason)))
+		return false
+	end
+
+	local inventory = ensureInventory(data)
+	local equipment = ensureEquipment(data)
+	local equipped = equipment[slotName]
+	rawAddToInventory(inventory, equipped.itemId, 1, equipped.metadata)
+	equipment[slotName] = nil
+
+	scheduleSave(player)
+	return true
+end
+
+return InventoryService
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">a89414b67eca401c92f1a3fa1f7a5b71</UniqueId>
+					</Properties>
+				</Item>
 			</Item>
 			<Item class="Script" referent="RBXDE5EC164C1F244C3B1632F260C99FC90">
 				<Properties>
@@ -3155,51 +3644,45 @@ local Server = ServerScriptService:WaitForChild("Server")
 local allPassed = true
 local results: { string } = {}
 
-local function smokeRequire(label: string, moduleScript: ModuleScript): any?
-	local ok, result = pcall(require, moduleScript)
-	if ok then
+local function record(label: string, passed: boolean, detail: string?)
+	if passed then
 		table.insert(results, string.format("[PASS] %s", label))
-		return result
-	end
-
-	allPassed = false
-	table.insert(results, string.format("[FAIL] %s: %s", label, tostring(result)))
-	return nil
-end
-
-local playerDataConfig = smokeRequire("PlayerDataConfig", Shared:WaitForChild("Config"):WaitForChild("PlayerDataConfig") :: ModuleScript)
-smokeRequire("QuestsConfig", Shared:WaitForChild("Config"):WaitForChild("QuestsConfig") :: ModuleScript)
-smokeRequire("QuestRemotes", Shared:WaitForChild("Remotes"):WaitForChild("QuestRemotes") :: ModuleScript)
-smokeRequire("QuestsServerConfig", Server:WaitForChild("Config"):WaitForChild("QuestsServerConfig") :: ModuleScript)
-smokeRequire("QuestValidator", Server:WaitForChild("Validators"):WaitForChild("QuestValidator") :: ModuleScript)
-local playerDataService = smokeRequire("PlayerDataService", Server:WaitForChild("Services"):WaitForChild("PlayerDataService") :: ModuleScript)
-smokeRequire("QuestService", Server:WaitForChild("Services"):WaitForChild("QuestService") :: ModuleScript)
-
-if playerDataService then
-	for _, methodName in ipairs({ "Init", "LoadPlayer", "SavePlayer", "ScheduleSave", "GetData", "UpdateData", "IsLoaded", "ReleasePlayer" }) do
-		if type(playerDataService[methodName]) == "function" then
-			table.insert(results, string.format("[PASS] PlayerDataService.%s", methodName))
-		else
-			allPassed = false
-			table.insert(results, string.format("[FAIL] PlayerDataService.%s missing", methodName))
-		end
-	end
-end
-
-if playerDataConfig and type(playerDataConfig.DeepCopyDefault) == "function" then
-	local ok, data = pcall(playerDataConfig.DeepCopyDefault)
-	if ok and type(data) == "table" then
-		for _, key in ipairs({ "Version", "Level", "Exp", "Gold", "SelectedClass", "SelectedRole", "Stats", "Inventory", "Equipment", "ActiveQuests", "CompletedQuests", "Professions", "DungeonProgress", "ArenaProfile", "Settings" }) do
-			if data[key] == nil then
-				allPassed = false
-				table.insert(results, string.format("[FAIL] PlayerData default missing %s", key))
-			end
-		end
-		table.insert(results, "[PASS] PlayerDataConfig.DeepCopyDefault shape checked")
 	else
 		allPassed = false
-		table.insert(results, "[FAIL] PlayerDataConfig.DeepCopyDefault failed")
+		table.insert(results, string.format("[FAIL] %s%s", label, if detail then ": " .. detail else ""))
 	end
+end
+
+local playerDataConfig = require(Shared:WaitForChild("Config"):WaitForChild("PlayerDataConfig") :: ModuleScript)
+local itemConfig = require(Shared:WaitForChild("Config"):WaitForChild("ItemConfig") :: ModuleScript)
+require(Shared:WaitForChild("Config"):WaitForChild("QuestsConfig") :: ModuleScript)
+require(Shared:WaitForChild("Remotes"):WaitForChild("QuestRemotes") :: ModuleScript)
+require(Server:WaitForChild("Config"):WaitForChild("QuestsServerConfig") :: ModuleScript)
+require(Server:WaitForChild("Validators"):WaitForChild("QuestValidator") :: ModuleScript)
+require(Server:WaitForChild("Validators"):WaitForChild("InventoryValidator") :: ModuleScript)
+local playerDataService = require(Server:WaitForChild("Services"):WaitForChild("PlayerDataService") :: ModuleScript)
+local inventoryService = require(Server:WaitForChild("Services"):WaitForChild("InventoryService") :: ModuleScript)
+require(Server:WaitForChild("Services"):WaitForChild("QuestService") :: ModuleScript)
+
+for _, methodName in ipairs({ "Init", "LoadPlayer", "SavePlayer", "ScheduleSave", "GetData", "UpdateData", "IsLoaded", "ReleasePlayer" }) do
+	record(string.format("PlayerDataService.%s", methodName), type(playerDataService[methodName]) == "function")
+end
+
+for _, methodName in ipairs({ "Init", "AddItem", "RemoveItem", "HasItem", "GetInventory", "EquipItem", "UnequipSlot", "GetEquipment" }) do
+	record(string.format("InventoryService.%s", methodName), type(inventoryService[methodName]) == "function")
+end
+
+for _, itemId in ipairs({ "item_health_potion", "item_mana_potion", "item_mistleaf", "item_goblin_dagger", "item_crypt_key", "item_iron_guard_vest", "item_bone_fragment", "starter_sword", "starter_staff", "starter_shield", "copper_ore", "empty_vial" }) do
+	record(string.format("ItemConfig has %s", itemId), itemConfig.IsValidItem(itemId))
+end
+
+local ok, data = pcall(playerDataConfig.DeepCopyDefault)
+if ok and type(data) == "table" then
+	for _, key in ipairs({ "Version", "Level", "Exp", "Gold", "SelectedClass", "SelectedRole", "Stats", "Inventory", "Equipment", "ActiveQuests", "CompletedQuests", "Professions", "DungeonProgress", "ArenaProfile", "Settings" }) do
+		record(string.format("PlayerData default has %s", key), data[key] ~= nil)
+	end
+else
+	record("PlayerDataConfig.DeepCopyDefault", false, "failed or returned non-table")
 end
 
 for _, line in ipairs(results) do
@@ -3207,7 +3690,7 @@ for _, line in ipairs(results) do
 end
 
 if allPassed then
-	print("[GhostyRPG Smoke] All quest/player-data foundation checks passed.")
+	print("[GhostyRPG Smoke] All quest/player-data/inventory foundation checks passed.")
 else
 	warn("[GhostyRPG Smoke] One or more checks failed.")
 end
@@ -3234,10 +3717,12 @@ local Server = ServerScriptService:WaitForChild("Server")
 local Services = Server:WaitForChild("Services")
 
 local PlayerDataService = require(Services:WaitForChild("PlayerDataService"))
+local InventoryService = require(Services:WaitForChild("InventoryService"))
 local QuestService = require(Services:WaitForChild("QuestService"))
 
 PlayerDataService.Init()
-QuestService.Init(PlayerDataService)
+InventoryService.Init(PlayerDataService)
+QuestService.Init(PlayerDataService, InventoryService)
 
 local function onPlayerAdded(player: Player)
 	task.spawn(function()
