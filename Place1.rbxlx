@@ -7005,6 +7005,15 @@ function PartyService.GetMembers(partyId: string?): { Player }?
 	return copy
 end
 
+
+function PartyService.GetPartyMembers(player: Player?): { Player }?
+	local party = PartyService.GetParty(player)
+	if not party then
+		return nil
+	end
+	return PartyService.GetMembers(party.id)
+end
+
 function PartyService._GetState()
 	return {
 		parties = parties,
@@ -7150,6 +7159,27 @@ local function getPartyMembers(leader: Player): { Player }
 	return { leader }
 end
 
+
+local function buildEntrySnapshots(members: { Player }): ({ any }?, string?)
+	if not playerDataService or type(playerDataService.GetData) ~= "function" then
+		return nil, "PlayerDataService.GetData is unavailable."
+	end
+
+	local snapshots = {}
+	for _, member in ipairs(members) do
+		local data = playerDataService.GetData(member)
+		if type(data) ~= "table" then
+			return nil, string.format("Player data unavailable for %s.", member.Name)
+		end
+		table.insert(snapshots, {
+			UserId = member.UserId,
+			Level = data.Level,
+			SelectedRole = data.SelectedRole or data.Role,
+		})
+	end
+	return snapshots, nil
+end
+
 local function buildObjectives(objectiveIds: { string }?): { [string]: boolean }
 	local objectives = {}
 	for _, objectiveId in ipairs(objectiveIds or {}) do
@@ -7264,6 +7294,16 @@ function DungeonService.CreateRun(leaderPlayer: Player, dungeonId: string, diffi
 		if playerRunIndex[member.UserId] then
 			return nil, string.format("Party member %s is already in a dungeon run.", member.Name)
 		end
+	end
+
+	local snapshots, snapshotError = buildEntrySnapshots(members)
+	if not snapshots then
+		return nil, snapshotError or "Unable to build dungeon entry snapshots."
+	end
+
+	local entryValidation = DungeonValidator.CanEnterDungeon(snapshots, dungeonId, difficulty)
+	if not entryValidation.success then
+		return nil, entryValidation.reason or "Dungeon entry validation failed."
 	end
 
 	local validation = DungeonValidator.ValidateRun({
@@ -7532,7 +7572,7 @@ end
 record("PartyValidator.MAX_PARTY_SIZE", partyValidator.MAX_PARTY_SIZE == 5)
 record("PartyValidator.INVITE_EXPIRE_SECONDS", partyValidator.INVITE_EXPIRE_SECONDS == 60)
 
-for _, methodName in ipairs({ "IsValidDifficulty", "ValidateRun", "GetRewards" }) do
+for _, methodName in ipairs({ "IsValidDungeon", "IsValidDifficulty", "ValidateRoleComposition", "ValidateLevelRequirements", "CanEnterDungeon", "ValidateRun", "GetRewards" }) do
 	record(string.format("DungeonValidator.%s", methodName), type(dungeonValidator[methodName]) == "function")
 end
 record("DungeonValidator accepts Normal difficulty", dungeonValidator.IsValidDifficulty("Normal").success)
@@ -7564,7 +7604,7 @@ for _, methodName in ipairs({ "Init", "AddExperience", "GetProfessionData", "Gat
 	record(string.format("ProfessionService.%s", methodName), type(professionService[methodName]) == "function")
 end
 
-for _, methodName in ipairs({ "Init", "CreateParty", "InvitePlayer", "AcceptInvite", "DeclineInvite", "LeaveParty", "KickMember", "DisbandParty", "GetParty", "GetPartyById", "IsLeader", "GetMembers" }) do
+for _, methodName in ipairs({ "Init", "CreateParty", "InvitePlayer", "AcceptInvite", "DeclineInvite", "LeaveParty", "KickMember", "DisbandParty", "GetParty", "GetPartyById", "IsLeader", "GetMembers", "GetPartyMembers" }) do
 	record(string.format("PartyService.%s", methodName), type(partyService[methodName]) == "function")
 end
 record("PartyService.GetParty(nil)", partyService.GetParty(nil) == nil)
@@ -8146,6 +8186,75 @@ end
 					<int64 name="SourceAssetId">-1</int64>
 					<BinaryString name="Tags"></BinaryString>
 					<UniqueId name="UniqueId">065858b32f1dec05971297f48b2159f6</UniqueId>
+				</Properties>
+			</Item>
+
+			<Item class="Script" referent="RBXB388B1DA5528C371B8848281357DE3B3">
+				<Properties>
+					<BinaryString name="AttributesSerialize"></BinaryString>
+					<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+					<bool name="DefinesCapabilities">false</bool>
+					<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+					<string name="Name">ServerRuntimeSmokeTest</string>
+					<ProtectedString name="Source"><![CDATA[--!strict
+-- Verifies that the Server folder and core descendants are visible in server runtime.
+-- This catches save/publish/runtime-replication issues where edit-mode objects appear but runtime objects are missing.
+
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local checks = {
+	{ { "Server" }, "Folder" },
+	{ { "Server", "Config" }, "Folder" },
+	{ { "Server", "Validators" }, "Folder" },
+	{ { "Server", "Services" }, "Folder" },
+	{ { "Server", "Boot.server" }, "Script" },
+	{ { "Server", "Services", "PlayerDataService" }, "ModuleScript" },
+	{ { "Server", "Services", "DungeonService" }, "ModuleScript" },
+	{ { "Server", "Validators", "DungeonValidator" }, "ModuleScript" },
+	{ { "Server", "Config", "DungeonConfig" }, "ModuleScript" },
+}
+
+local function formatPath(segments: { string }): string
+	return table.concat(segments, ".")
+end
+
+local function findPath(segments: { string }): Instance?
+	local current: Instance = ServerScriptService
+	for _, segment in ipairs(segments) do
+		local child = current:FindFirstChild(segment)
+		if not child then
+			return nil
+		end
+		current = child
+	end
+	return current
+end
+
+local passed = 0
+local failed = 0
+for _, check in ipairs(checks) do
+	local segments = check[1]
+	local expectedClass = check[2]
+	local path = formatPath(segments)
+	local inst = findPath(segments)
+	if inst and inst.ClassName == expectedClass then
+		passed += 1
+		print(string.format("[ServerRuntimeSmokeTest] [PASS] %s", path))
+	else
+		failed += 1
+		warn(string.format("[ServerRuntimeSmokeTest] [FAIL] %s expected %s, got %s", path, expectedClass, inst and inst.ClassName or "nil"))
+	end
+end
+
+if failed == 0 then
+	print(string.format("[ServerRuntimeSmokeTest] Server runtime tree OK (%d checks).", passed))
+else
+	warn(string.format("[ServerRuntimeSmokeTest] Server runtime tree missing objects: %d passed, %d failed.", passed, failed))
+end
+]]></ProtectedString>
+					<int64 name="SourceAssetId">-1</int64>
+					<BinaryString name="Tags"></BinaryString>
+					<UniqueId name="UniqueId">d06086a78564ff0db36ddd3bc1625a4b</UniqueId>
 				</Properties>
 			</Item>
 </Item>
