@@ -1816,6 +1816,129 @@ return StatFormulas
 					</Properties>
 				</Item>
 
+				<Item class="ModuleScript" referent="RBX01E84157BB814F14A0FD6011C91628BC">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">MobConfig</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Client-safe mob metadata for GhostyRPG.
+-- Keep secret rewards and drop rates in server-only MobServerConfig.
+
+local MobConfig = {}
+
+export type PublicLootHint = {
+	itemId: string,
+	displayName: string,
+}
+
+export type MobDefinition = {
+	mobId: string,
+	name: string,
+	level: number,
+	maxHealth: number,
+	armor: number,
+	damage: number,
+	attackRange: number,
+	aggroRange: number,
+	tags: { string },
+	respawnSeconds: number,
+	lootTablePublic: { PublicLootHint }?,
+}
+
+local MOBS: { [string]: MobDefinition } = {
+	mob_ghost_slime = {
+		mobId = "mob_ghost_slime",
+		name = "Ghost Slime",
+		level = 1,
+		maxHealth = 60,
+		armor = 0,
+		damage = 5,
+		attackRange = 4,
+		aggroRange = 16,
+		tags = { "undead", "slime", "overworld" },
+		respawnSeconds = 30,
+		lootTablePublic = {
+			{ itemId = "item_mistleaf", displayName = "Mistleaf" },
+			{ itemId = "item_health_potion", displayName = "Health Potion" },
+		},
+	},
+
+	mob_grave_goblin = {
+		mobId = "mob_grave_goblin",
+		name = "Grave Goblin",
+		level = 3,
+		maxHealth = 120,
+		armor = 5,
+		damage = 12,
+		attackRange = 5,
+		aggroRange = 20,
+		tags = { "goblin", "undead", "overworld" },
+		respawnSeconds = 45,
+		lootTablePublic = {
+			{ itemId = "item_goblin_dagger", displayName = "Grave Goblin Dagger" },
+			{ itemId = "item_health_potion", displayName = "Health Potion" },
+		},
+	},
+
+	mob_restless_skeleton = {
+		mobId = "mob_restless_skeleton",
+		name = "Restless Skeleton",
+		level = 5,
+		maxHealth = 200,
+		armor = 15,
+		damage = 20,
+		attackRange = 6,
+		aggroRange = 22,
+		tags = { "undead", "skeleton", "overworld" },
+		respawnSeconds = 60,
+		lootTablePublic = {
+			{ itemId = "item_bone_fragment", displayName = "Bone Fragment" },
+			{ itemId = "item_iron_guard_vest", displayName = "Iron Guard Vest" },
+		},
+	},
+}
+
+function MobConfig.GetMob(mobId: string): MobDefinition?
+	return MOBS[mobId]
+end
+
+function MobConfig.IsValidMob(mobId: string): boolean
+	return MOBS[mobId] ~= nil
+end
+
+function MobConfig.GetMaxHealth(mobId: string): number?
+	local mob = MOBS[mobId]
+	return if mob then mob.maxHealth else nil
+end
+
+function MobConfig.GetLevel(mobId: string): number?
+	local mob = MOBS[mobId]
+	return if mob then mob.level else nil
+end
+
+function MobConfig.GetAllMobIds(): { string }
+	local ids = {}
+	for mobId in pairs(MOBS) do
+		table.insert(ids, mobId)
+	end
+	return ids
+end
+
+function MobConfig.GetAll(): { [string]: MobDefinition }
+	return MOBS
+end
+
+return MobConfig
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">00be3daad5b547368f018e38bea28674</UniqueId>
+					</Properties>
+				</Item>
+
 				<Item class="ModuleScript" referent="RBX027F0D9F57EF469C8087463BEB4DFD5F">
 					<Properties>
 						<BinaryString name="AttributesSerialize"></BinaryString>
@@ -2563,8 +2686,8 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local sharedConfig = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config")
 local serverConfig = ServerScriptService:WaitForChild("Server"):WaitForChild("Config")
 
-local sharedModules = { "GameEnums", "ClassConfig", "RoleConfig", "StatFormulas", "AbilityConfig", "QuestsConfig", "PlayerDataConfig", "ItemConfig" }
-local serverModules = { "ProfessionConfig", "DungeonConfig", "RaidConfig", "ArenaConfig", "QuestsServerConfig" }
+local sharedModules = { "GameEnums", "ClassConfig", "RoleConfig", "StatFormulas", "AbilityConfig", "MobConfig", "QuestsConfig", "PlayerDataConfig", "ItemConfig" }
+local serverModules = { "ProfessionConfig", "DungeonConfig", "RaidConfig", "ArenaConfig", "MobServerConfig", "QuestsServerConfig" }
 
 for _, moduleName in ipairs(sharedModules) do
 	require(sharedConfig:WaitForChild(moduleName))
@@ -2579,6 +2702,119 @@ print(string.format("[GhostyRPG] Config smoke test loaded %d modules.", #sharedM
 						<int64 name="SourceAssetId">-1</int64>
 						<BinaryString name="Tags"></BinaryString>
 						<UniqueId name="UniqueId">d738e87cebc64b16a016c7b34349626b</UniqueId>
+					</Properties>
+				</Item>
+
+				<Item class="ModuleScript" referent="RBX0622FD5DD200408F83FF1F8D33EAE27C">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">MobServerConfig</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Server-only mob reward data for GhostyRPG.
+-- Do not require this module from client code; public mob metadata lives in MobConfig.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local ItemConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"):WaitForChild("ItemConfig"))
+
+local MobServerConfig = {}
+
+export type LootEntry = {
+	itemId: string,
+	minAmount: number,
+	maxAmount: number,
+	chance: number,
+}
+
+export type ServerMobDefinition = {
+	mobId: string,
+	exp: number,
+	gold: number,
+	loot: { LootEntry },
+}
+
+local SERVER_MOBS: { [string]: ServerMobDefinition } = {
+	mob_ghost_slime = {
+		mobId = "mob_ghost_slime",
+		exp = 25,
+		gold = 5,
+		loot = {
+			{ itemId = "item_mistleaf", minAmount = 1, maxAmount = 2, chance = 0.60 },
+			{ itemId = "item_health_potion", minAmount = 1, maxAmount = 1, chance = 0.20 },
+		},
+	},
+
+	mob_grave_goblin = {
+		mobId = "mob_grave_goblin",
+		exp = 75,
+		gold = 15,
+		loot = {
+			{ itemId = "item_goblin_dagger", minAmount = 1, maxAmount = 1, chance = 0.10 },
+			{ itemId = "item_health_potion", minAmount = 1, maxAmount = 2, chance = 0.30 },
+		},
+	},
+
+	mob_restless_skeleton = {
+		mobId = "mob_restless_skeleton",
+		exp = 150,
+		gold = 30,
+		loot = {
+			{ itemId = "item_bone_fragment", minAmount = 1, maxAmount = 3, chance = 0.75 },
+			{ itemId = "item_mana_potion", minAmount = 1, maxAmount = 1, chance = 0.35 },
+			{ itemId = "item_iron_guard_vest", minAmount = 1, maxAmount = 1, chance = 0.05 },
+		},
+	},
+}
+
+local errors = {}
+for mobId, entry in pairs(SERVER_MOBS) do
+	for _, lootEntry in ipairs(entry.loot) do
+		if not ItemConfig.IsValidItem(lootEntry.itemId) then
+			table.insert(errors, string.format("[MobServerConfig] mob '%s' references unknown itemId '%s'", mobId, lootEntry.itemId))
+		end
+		if lootEntry.minAmount > lootEntry.maxAmount then
+			table.insert(errors, string.format("[MobServerConfig] mob '%s' item '%s': minAmount(%d) > maxAmount(%d)", mobId, lootEntry.itemId, lootEntry.minAmount, lootEntry.maxAmount))
+		end
+		if lootEntry.chance < 0 or lootEntry.chance > 1 then
+			table.insert(errors, string.format("[MobServerConfig] mob '%s' item '%s': chance(%.2f) out of [0,1]", mobId, lootEntry.itemId, lootEntry.chance))
+		end
+	end
+end
+if #errors > 0 then
+	error(table.concat(errors, "\n"), 2)
+end
+
+function MobServerConfig.GetServerMob(mobId: string): ServerMobDefinition?
+	return SERVER_MOBS[mobId]
+end
+
+function MobServerConfig.GetExp(mobId: string): number
+	local entry = SERVER_MOBS[mobId]
+	return if entry then entry.exp else 0
+end
+
+function MobServerConfig.GetGold(mobId: string): number
+	local entry = SERVER_MOBS[mobId]
+	return if entry then entry.gold else 0
+end
+
+function MobServerConfig.GetLootTable(mobId: string): { LootEntry }
+	local entry = SERVER_MOBS[mobId]
+	return if entry then entry.loot else {}
+end
+
+function MobServerConfig.GetAll(): { [string]: ServerMobDefinition }
+	return SERVER_MOBS
+end
+
+return MobServerConfig
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">8a35137b11894621b9d9338832dbdc71</UniqueId>
 					</Properties>
 				</Item>
 
@@ -3630,6 +3866,205 @@ return CombatService
 			</Item>
 
 
+				<Item class="ModuleScript" referent="RBX3502ED94EA854A02A2D2D3A6FAC77165">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">MobService</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Server-authoritative mob registry and reward pipeline for GhostyRPG.
+-- Tracks live mob state in memory, handles damage/death, grants rewards, and notifies quests.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+
+local MobConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"):WaitForChild("MobConfig"))
+local MobServerConfig = require(ServerScriptService:WaitForChild("Server"):WaitForChild("Config"):WaitForChild("MobServerConfig"))
+
+local MobService = {}
+
+export type MobState = {
+	mobId: string,
+	currentHealth: number,
+	maxHealth: number,
+	level: number,
+	isDead: boolean,
+	killedBy: Player?,
+}
+
+local playerDataService: any = nil
+local questService: any = nil
+local inventoryService: any = nil
+local initialized = false
+local registry: { [Instance]: MobState } = {}
+
+local function assertInitialized()
+	assert(initialized and playerDataService and questService and inventoryService, "MobService requires Init(playerDataService, questService, inventoryService) before use.")
+end
+
+local function safeCall(label: string, callback: () -> ())
+	local ok, err = pcall(callback)
+	if not ok then
+		warn(string.format("[MobService] %s failed: %s", label, tostring(err)))
+	end
+	return ok
+end
+
+local function rollLoot(lootTable: { any }): { { itemId: string, amount: number } }
+	local drops = {}
+	for _, entry in ipairs(lootTable) do
+		if math.random() <= entry.chance then
+			table.insert(drops, {
+				itemId = entry.itemId,
+				amount = math.random(entry.minAmount, entry.maxAmount),
+			})
+		end
+	end
+	return drops
+end
+
+function MobService.Init(newPlayerDataService: any, newQuestService: any, newInventoryService: any)
+	if initialized then
+		warn("[MobService] Init called more than once; ignoring duplicate call.")
+		return
+	end
+
+	assert(newPlayerDataService, "MobService.Init requires PlayerDataService.")
+	assert(type(newPlayerDataService.AddExp) == "function", "MobService.Init requires PlayerDataService.AddExp.")
+	assert(type(newPlayerDataService.AddGold) == "function", "MobService.Init requires PlayerDataService.AddGold.")
+	assert(newQuestService, "MobService.Init requires QuestService.")
+	assert(type(newQuestService.NotifyKill) == "function", "MobService.Init requires QuestService.NotifyKill.")
+	assert(newInventoryService, "MobService.Init requires InventoryService.")
+	assert(type(newInventoryService.AddItem) == "function", "MobService.Init requires InventoryService.AddItem.")
+
+	playerDataService = newPlayerDataService
+	questService = newQuestService
+	inventoryService = newInventoryService
+	initialized = true
+	print("[MobService] Initialized.")
+end
+
+function MobService.RegisterMob(model: Instance, mobId: string): MobState
+	assertInitialized()
+	assert(typeof(model) == "Instance", "MobService.RegisterMob requires an Instance model.")
+	assert(type(mobId) == "string" and mobId ~= "", "MobService.RegisterMob requires a non-empty mobId.")
+	assert(MobConfig.IsValidMob(mobId), "MobService.RegisterMob unknown mobId: " .. mobId)
+
+	if registry[model] then
+		warn(string.format("[MobService] RegisterMob overwriting existing registry entry for %s.", model:GetFullName()))
+	end
+
+	local maxHealth = MobConfig.GetMaxHealth(mobId) or 1
+	local level = MobConfig.GetLevel(mobId) or 1
+	local state: MobState = {
+		mobId = mobId,
+		currentHealth = maxHealth,
+		maxHealth = maxHealth,
+		level = level,
+		isDead = false,
+		killedBy = nil,
+	}
+
+	registry[model] = state
+	model:SetAttribute("MobId", mobId)
+	model:SetAttribute("CurrentHealth", maxHealth)
+	model:SetAttribute("MaxHealth", maxHealth)
+	model:SetAttribute("Level", level)
+	return state
+end
+
+function MobService.UnregisterMob(model: Instance)
+	if registry[model] == nil then
+		return
+	end
+	registry[model] = nil
+end
+
+function MobService.IsRegistered(model: Instance): boolean
+	return registry[model] ~= nil
+end
+
+function MobService.GetMobState(model: Instance): MobState?
+	return registry[model]
+end
+
+function MobService.ApplyDamage(model: Instance, amount: number, sourcePlayer: Player?)
+	assertInitialized()
+	assert(typeof(model) == "Instance", "MobService.ApplyDamage requires an Instance model.")
+	assert(type(amount) == "number" and amount >= 0, "MobService.ApplyDamage requires non-negative damage.")
+
+	local state = registry[model]
+	if not state or state.isDead then
+		return
+	end
+
+	local mobDef = MobConfig.GetMob(state.mobId)
+	local armor = if mobDef then mobDef.armor else 0
+	local effectiveDamage = math.max(0, amount - armor)
+	state.currentHealth = math.max(0, state.currentHealth - effectiveDamage)
+	model:SetAttribute("CurrentHealth", state.currentHealth)
+
+	if state.currentHealth <= 0 then
+		MobService.KillMob(model, sourcePlayer)
+	end
+end
+
+function MobService.KillMob(model: Instance, killerPlayer: Player?)
+	assertInitialized()
+	assert(typeof(model) == "Instance", "MobService.KillMob requires an Instance model.")
+
+	local state = registry[model]
+	if not state or state.isDead then
+		return
+	end
+
+	state.isDead = true
+	state.killedBy = killerPlayer
+	state.currentHealth = 0
+	model:SetAttribute("CurrentHealth", 0)
+
+	local mobId = state.mobId
+	if killerPlayer and typeof(killerPlayer) == "Instance" and killerPlayer:IsA("Player") then
+		local serverData = MobServerConfig.GetServerMob(mobId)
+		if serverData then
+			if serverData.exp > 0 then
+				safeCall("PlayerDataService.AddExp", function()
+					playerDataService.AddExp(killerPlayer, serverData.exp)
+				end)
+			end
+			if serverData.gold > 0 then
+				safeCall("PlayerDataService.AddGold", function()
+					playerDataService.AddGold(killerPlayer, serverData.gold)
+				end)
+			end
+			for _, drop in ipairs(rollLoot(serverData.loot or {})) do
+				local capturedDrop = drop
+				safeCall("InventoryService.AddItem(" .. capturedDrop.itemId .. ")", function()
+					inventoryService.AddItem(killerPlayer, capturedDrop.itemId, capturedDrop.amount)
+				end)
+			end
+		else
+			warn(string.format("[MobService] No MobServerConfig reward entry for %s.", mobId))
+		end
+
+		safeCall("QuestService.NotifyKill", function()
+			questService.NotifyKill(killerPlayer, mobId)
+		end)
+	end
+
+	MobService.UnregisterMob(model)
+end
+
+return MobService
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">9379202beae041b09ac2515266f971fb</UniqueId>
+					</Properties>
+				</Item>
+
 				<Item class="ModuleScript" referent="RBX9E86B1116C474E2B8ED99C144C5311C2">
 					<Properties>
 						<BinaryString name="AttributesSerialize"></BinaryString>
@@ -4246,6 +4681,34 @@ function PlayerDataService.IsLoaded(player: Player): boolean
 	return profiles[player] ~= nil
 end
 
+function PlayerDataService.AddExp(player: Player, amount: number): boolean
+	local data = profiles[player]
+	if not data then
+		warn(string.format("[PlayerDataService] AddExp called for unloaded player %s.", player.Name))
+		return false
+	end
+	if type(amount) ~= "number" or amount <= 0 then
+		return false
+	end
+	data.Exp = (data.Exp or 0) + math.floor(amount)
+	PlayerDataService.ScheduleSave(player)
+	return true
+end
+
+function PlayerDataService.AddGold(player: Player, amount: number): boolean
+	local data = profiles[player]
+	if not data then
+		warn(string.format("[PlayerDataService] AddGold called for unloaded player %s.", player.Name))
+		return false
+	end
+	if type(amount) ~= "number" or amount <= 0 then
+		return false
+	end
+	data.Gold = (data.Gold or 0) + math.floor(amount)
+	PlayerDataService.ScheduleSave(player)
+	return true
+end
+
 function PlayerDataService.ReleasePlayer(player: Player)
 	local pending = pendingSaves[player]
 	if pending then
@@ -4853,8 +5316,10 @@ local Validators = Server:WaitForChild("Validators")
 local playerDataConfig = require(Config:WaitForChild("PlayerDataConfig") :: ModuleScript)
 local itemConfig = require(Config:WaitForChild("ItemConfig") :: ModuleScript)
 local abilityConfig = require(Config:WaitForChild("AbilityConfig") :: ModuleScript)
+local mobConfig = require(Config:WaitForChild("MobConfig") :: ModuleScript)
 require(Config:WaitForChild("QuestsConfig") :: ModuleScript)
 local questRemotes = require(Shared:WaitForChild("Remotes"):WaitForChild("QuestRemotes") :: ModuleScript)
+local mobServerConfig = require(Server:WaitForChild("Config"):WaitForChild("MobServerConfig") :: ModuleScript)
 require(Server:WaitForChild("Config"):WaitForChild("QuestsServerConfig") :: ModuleScript)
 require(Validators:WaitForChild("QuestValidator") :: ModuleScript)
 require(Validators:WaitForChild("InventoryValidator") :: ModuleScript)
@@ -4864,6 +5329,7 @@ local playerDataService = require(Server:WaitForChild("Services"):WaitForChild("
 local inventoryService = require(Server:WaitForChild("Services"):WaitForChild("InventoryService") :: ModuleScript)
 local statsService = require(Server:WaitForChild("Services"):WaitForChild("StatsService") :: ModuleScript)
 local combatService = require(Server:WaitForChild("Services"):WaitForChild("CombatService") :: ModuleScript)
+local mobService = require(Server:WaitForChild("Services"):WaitForChild("MobService") :: ModuleScript)
 local classService = require(Server:WaitForChild("Services"):WaitForChild("ClassService") :: ModuleScript)
 require(Server:WaitForChild("Services"):WaitForChild("QuestService") :: ModuleScript)
 
@@ -4879,7 +5345,15 @@ for _, methodName in ipairs({ "CanUseAbility", "HasRequiredLevel", "HasRequiredC
 	record(string.format("AbilityValidator.%s", methodName), type(abilityValidator[methodName]) == "function")
 end
 
-for _, methodName in ipairs({ "Init", "LoadPlayer", "SavePlayer", "ScheduleSave", "GetData", "UpdateData", "IsLoaded", "ReleasePlayer" }) do
+for _, methodName in ipairs({ "GetMob", "IsValidMob", "GetMaxHealth", "GetLevel", "GetAll", "GetAllMobIds" }) do
+	record(string.format("MobConfig.%s", methodName), type(mobConfig[methodName]) == "function")
+end
+
+for _, methodName in ipairs({ "GetServerMob", "GetExp", "GetGold", "GetLootTable", "GetAll" }) do
+	record(string.format("MobServerConfig.%s", methodName), type(mobServerConfig[methodName]) == "function")
+end
+
+for _, methodName in ipairs({ "Init", "LoadPlayer", "SavePlayer", "ScheduleSave", "GetData", "UpdateData", "IsLoaded", "AddExp", "AddGold", "ReleasePlayer" }) do
 	record(string.format("PlayerDataService.%s", methodName), type(playerDataService[methodName]) == "function")
 end
 
@@ -4903,6 +5377,10 @@ for _, methodName in ipairs({ "Init", "IsInitialized", "UseAbility", "ApplyDamag
 	record(string.format("CombatService.%s", methodName), type(combatService[methodName]) == "function")
 end
 record("CombatService.IsInitialized() false before Init", combatService.IsInitialized() == false)
+
+for _, methodName in ipairs({ "Init", "RegisterMob", "UnregisterMob", "ApplyDamage", "KillMob", "GetMobState", "IsRegistered" }) do
+	record(string.format("MobService.%s", methodName), type(mobService[methodName]) == "function")
+end
 
 
 for _, className in ipairs({ "Warrior", "Paladin", "Mage", "Priest", "Rogue", "Hunter" }) do
@@ -4981,6 +5459,40 @@ record("data.Level not mutated", warriorTank.Level == originalLevel)
 record("data.Stats.Resource not mutated", warriorTank.Stats.Resource == originalResource)
 record("cooldownState not mutated", cdSnapshot.WARRIOR_TAUNT == originalCooldown)
 
+local requiredMobIds = { "mob_ghost_slime", "mob_grave_goblin", "mob_restless_skeleton" }
+local requiredMobFields = { "mobId", "name", "level", "maxHealth", "armor", "damage", "attackRange", "aggroRange", "tags", "respawnSeconds" }
+for _, mobId in ipairs(requiredMobIds) do
+	local mob = mobConfig.GetMob(mobId)
+	record(string.format("MobConfig has %s", mobId), type(mob) == "table")
+	if type(mob) == "table" then
+		for _, field in ipairs(requiredMobFields) do
+			record(string.format("%s.%s present", mobId, field), mob[field] ~= nil)
+		end
+		record(string.format("%s tags table", mobId), type(mob.tags) == "table")
+		record(string.format("%s maxHealth positive", mobId), type(mob.maxHealth) == "number" and mob.maxHealth > 0)
+		record(string.format("%s GetMaxHealth matches", mobId), mobConfig.GetMaxHealth(mobId) == mob.maxHealth)
+		record(string.format("%s GetLevel matches", mobId), mobConfig.GetLevel(mobId) == mob.level)
+	end
+
+	local serverMob = mobServerConfig.GetServerMob(mobId)
+	record(string.format("MobServerConfig has %s", mobId), type(serverMob) == "table")
+	if type(serverMob) == "table" then
+		record(string.format("%s exp positive", mobId), type(serverMob.exp) == "number" and serverMob.exp > 0)
+		record(string.format("%s gold non-negative", mobId), type(serverMob.gold) == "number" and serverMob.gold >= 0)
+		record(string.format("%s loot table", mobId), type(serverMob.loot) == "table")
+		for index, loot in ipairs(serverMob.loot) do
+			record(string.format("%s loot[%d] item valid", mobId, index), type(loot.itemId) == "string" and itemConfig.IsValidItem(loot.itemId))
+			record(string.format("%s loot[%d] amount range valid", mobId, index), type(loot.minAmount) == "number" and type(loot.maxAmount) == "number" and loot.minAmount <= loot.maxAmount)
+			record(string.format("%s loot[%d] chance valid", mobId, index), type(loot.chance) == "number" and loot.chance >= 0 and loot.chance <= 1)
+		end
+	end
+end
+
+local fakePart = Instance.new("Part")
+record("MobService.IsRegistered false before Init", mobService.IsRegistered(fakePart) == false)
+record("MobService.GetMobState nil before Init", mobService.GetMobState(fakePart) == nil)
+fakePart:Destroy()
+
 for _, itemId in ipairs({ "item_health_potion", "item_mana_potion", "item_mistleaf", "item_goblin_dagger", "item_crypt_key", "item_iron_guard_vest", "item_bone_fragment", "starter_sword", "starter_staff", "starter_shield", "copper_ore", "empty_vial" }) do
 	record(string.format("ItemConfig has %s", itemId), itemConfig.IsValidItem(itemId))
 end
@@ -5051,6 +5563,7 @@ local CombatService = require(Services:WaitForChild("CombatService"))
 local ClassService = require(Services:WaitForChild("ClassService"))
 local InventoryService = require(Services:WaitForChild("InventoryService"))
 local QuestService = require(Services:WaitForChild("QuestService"))
+local MobService = require(Services:WaitForChild("MobService"))
 
 PlayerDataService.Init()
 StatsService.Init(PlayerDataService)
@@ -5058,6 +5571,7 @@ CombatService.Init(PlayerDataService, StatsService)
 ClassService.Init(PlayerDataService, StatsService)
 InventoryService.Init(PlayerDataService)
 QuestService.Init(PlayerDataService, InventoryService)
+MobService.Init(PlayerDataService, QuestService, InventoryService)
 
 local function onPlayerAdded(player: Player)
 	task.spawn(function()
