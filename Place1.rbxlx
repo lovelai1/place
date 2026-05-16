@@ -2390,11 +2390,15 @@ return ItemConfig
 						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
 						<string name="Name">QuestRemotes</string>
 						<ProtectedString name="Source"><![CDATA[--!strict
--- Shared helper for GhostyRPG quest remotes.
--- Server creation is explicit/idempotent through Ensure(); clients only wait.
+-- Quest-scoped remote registry. GetEvent/GetFunction keep logical-key compatibility.
+-- Server Ensure creates instances; client Get* waits through RemoteRegistry and never creates.
 
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local RemoteRegistry = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Remotes"):WaitForChild("RemoteRegistry"))
+
+local NAMESPACE = "Quest"
 
 local EVENT_NAMES: { [string]: string } = {
 	AcceptQuest = "Quest_AcceptQuest",
@@ -2414,91 +2418,64 @@ local FUNCTION_NAMES: { [string]: string } = {
 }
 
 local QuestRemotes = {}
+QuestRemotes.Namespace = NAMESPACE
 QuestRemotes.EventNames = EVENT_NAMES
 QuestRemotes.FunctionNames = FUNCTION_NAMES
+QuestRemotes.EventKeys = table.freeze(table.clone(EVENT_NAMES))
+QuestRemotes.FunctionKeys = table.freeze(table.clone(FUNCTION_NAMES))
 
-local function getSharedFolder(): Folder
-	local shared = ReplicatedStorage:WaitForChild("Shared", 10)
-	assert(shared and shared:IsA("Folder"), "QuestRemotes: ReplicatedStorage.Shared was not found")
-	return shared :: Folder
-end
+local IS_SERVER = RunService:IsServer()
+local eventCache: { [string]: RemoteEvent } = {}
+local functionCache: { [string]: RemoteFunction } = {}
+local ensured = false
 
-local function getOrCreateFolder(parent: Instance, name: string): Folder
-	local existing = parent:FindFirstChild(name)
-	if existing then
-		assert(existing:IsA("Folder"), string.format("QuestRemotes: %s exists but is %s", name, existing.ClassName))
-		return existing :: Folder
-	end
-
-	assert(RunService:IsServer(), string.format("QuestRemotes: client cannot create folder %s", name))
-	local folder = Instance.new("Folder")
-	folder.Name = name
-	folder.Parent = parent
-	return folder
-end
-
-local function waitForFolder(parent: Instance, name: string): Folder
-	local folder = parent:WaitForChild(name, 15)
-	assert(folder and folder:IsA("Folder"), string.format("QuestRemotes: expected Folder %s", name))
-	return folder :: Folder
-end
-
-local function getQuestFolder(createOnServer: boolean): Folder
-	local shared = getSharedFolder()
-	if RunService:IsServer() and createOnServer then
-		local remotes = getOrCreateFolder(shared, "Remotes")
-		return getOrCreateFolder(remotes, "Quest")
-	end
-
-	local remotes = waitForFolder(shared, "Remotes")
-	return waitForFolder(remotes, "Quest")
-end
-
-local function getOrCreateRemote(parent: Instance, className: string, name: string): Instance
-	local existing = parent:FindFirstChild(name)
-	if existing then
-		assert(existing.ClassName == className, string.format("QuestRemotes: %s exists but is %s", name, existing.ClassName))
-		return existing
-	end
-
-	assert(RunService:IsServer(), string.format("QuestRemotes: client cannot create remote %s", name))
-	local remote = Instance.new(className)
-	remote.Name = name
-	remote.Parent = parent
-	return remote
+local function getRemoteName(key: string, names: { [string]: string }, label: string): string
+	local remoteName = names[key]
+	assert(remoteName, string.format("[QuestRemotes] Unknown %s key '%s'.", label, tostring(key)))
+	return remoteName
 end
 
 function QuestRemotes.Ensure(): Folder
-	local folder = getQuestFolder(RunService:IsServer())
-	if RunService:IsServer() then
-		for _, remoteName in pairs(EVENT_NAMES) do
-			getOrCreateRemote(folder, "RemoteEvent", remoteName)
-		end
-		for _, remoteName in pairs(FUNCTION_NAMES) do
-			getOrCreateRemote(folder, "RemoteFunction", remoteName)
-		end
+	assert(IS_SERVER, "[QuestRemotes] Ensure() must only be called on the server.")
+	local folder = RemoteRegistry.EnsureFolder(NAMESPACE)
+	for key, remoteName in pairs(EVENT_NAMES) do
+		eventCache[key] = RemoteRegistry.EnsureEvent(NAMESPACE, remoteName)
 	end
+	for key, remoteName in pairs(FUNCTION_NAMES) do
+		functionCache[key] = RemoteRegistry.EnsureFunction(NAMESPACE, remoteName)
+	end
+	ensured = true
 	return folder
 end
 
 function QuestRemotes.GetEvent(key: string): RemoteEvent
-	local name = EVENT_NAMES[key]
-	assert(name, string.format("QuestRemotes.GetEvent: unknown key '%s'", key))
-
-	local folder = if RunService:IsServer() then QuestRemotes.Ensure() else getQuestFolder(false)
-	local inst = folder:WaitForChild(name, 15)
-	assert(inst and inst:IsA("RemoteEvent"), string.format("QuestRemotes.GetEvent: expected RemoteEvent '%s'", name))
-	return inst :: RemoteEvent
+	local remoteName = getRemoteName(key, EVENT_NAMES, "event")
+	if eventCache[key] then
+		return eventCache[key]
+	end
+	if IS_SERVER and not ensured then
+		warn("[QuestRemotes] GetEvent() called on server before Ensure(); waiting for existing remote.")
+	end
+	local remote = RemoteRegistry.WaitForEvent(NAMESPACE, remoteName)
+	eventCache[key] = remote
+	return remote
 end
 
 function QuestRemotes.GetFunction(key: string): RemoteFunction
-	local name = FUNCTION_NAMES[key]
-	assert(name, string.format("QuestRemotes.GetFunction: unknown key '%s'", key))
+	local remoteName = getRemoteName(key, FUNCTION_NAMES, "function")
+	if functionCache[key] then
+		return functionCache[key]
+	end
+	if IS_SERVER and not ensured then
+		warn("[QuestRemotes] GetFunction() called on server before Ensure(); waiting for existing remote.")
+	end
+	local remote = RemoteRegistry.WaitForFunction(NAMESPACE, remoteName)
+	functionCache[key] = remote
+	return remote
+end
 
-	local folder = if RunService:IsServer() then QuestRemotes.Ensure() else getQuestFolder(false)
-	local inst = folder:WaitForChild(name, 15)
-	assert(inst and inst:IsA("RemoteFunction"), string.format("QuestRemotes.GetFunction: expected RemoteFunction '%s'", name))
-	return inst :: RemoteFunction
+function QuestRemotes.IsEnsured(): boolean
+	return ensured
 end
 
 return QuestRemotes
@@ -2508,7 +2485,290 @@ return QuestRemotes
 						<UniqueId name="UniqueId">704057cc4f9f4949bf04681a4ee219b7</UniqueId>
 					</Properties>
 				</Item>
-			</Item>
+			
+				<Item class="ModuleScript" referent="RBX6E226F5F1E87BC755BD253FB2F7E5464">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">RemoteRegistry</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Central creation/wait registry for GhostyRPG remotes.
+-- Server code creates through Ensure*; clients wait through WaitFor* and never create instances.
+
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local WAIT_TIMEOUT_SECONDS = 10
+local ROOT_PATH = { "Shared", "Remotes" }
+local IS_SERVER = RunService:IsServer()
+
+local RemoteRegistry = {}
+
+local function assertNonEmpty(value: any, label: string)
+	assert(type(value) == "string" and value ~= "", string.format("[RemoteRegistry] %s must be a non-empty string.", label))
+end
+
+local function resolveFolderChain(parent: Instance, names: { string }, canCreate: boolean): Folder
+	local current = parent
+	for _, name in ipairs(names) do
+		local child = current:FindFirstChild(name)
+		if child then
+			assert(child:IsA("Folder"), string.format("[RemoteRegistry] Expected Folder '%s', got %s.", child:GetFullName(), child.ClassName))
+			current = child
+		elseif canCreate then
+			local folder = Instance.new("Folder")
+			folder.Name = name
+			folder.Parent = current
+			current = folder
+		else
+			local found = current:WaitForChild(name, WAIT_TIMEOUT_SECONDS)
+			assert(found and found:IsA("Folder"), string.format("[RemoteRegistry] Timed out waiting for Folder '%s' under '%s'.", name, current:GetFullName()))
+			current = found
+		end
+	end
+	return current :: Folder
+end
+
+local function getRoot(canCreate: boolean): Folder
+	return resolveFolderChain(ReplicatedStorage, ROOT_PATH, canCreate)
+end
+
+local function ensureRemote(namespace: string, key: string, className: string): Instance
+	assert(IS_SERVER, string.format("[RemoteRegistry] Ensure%s() must only be called on the server.", className == "RemoteEvent" and "Event" or "Function"))
+	assertNonEmpty(namespace, "namespace")
+	assertNonEmpty(key, "key")
+
+	local folder = RemoteRegistry.EnsureFolder(namespace)
+	local remote = folder:FindFirstChild(key)
+	if not remote then
+		remote = Instance.new(className)
+		remote.Name = key
+		remote.Parent = folder
+	end
+	assert(remote.ClassName == className, string.format("[RemoteRegistry] '%s/%s' exists but is %s, not %s.", namespace, key, remote.ClassName, className))
+	return remote
+end
+
+local function waitForRemote(namespace: string, key: string, className: string): Instance
+	assertNonEmpty(namespace, "namespace")
+	assertNonEmpty(key, "key")
+
+	local root = getRoot(false)
+	local folder = root:WaitForChild(namespace, WAIT_TIMEOUT_SECONDS)
+	assert(folder and folder:IsA("Folder"), string.format("[RemoteRegistry] Timed out waiting for namespace '%s'.", namespace))
+	local remote = folder:WaitForChild(key, WAIT_TIMEOUT_SECONDS)
+	assert(remote and remote.ClassName == className, string.format("[RemoteRegistry] Expected %s '%s/%s'.", className, namespace, key))
+	return remote
+end
+
+function RemoteRegistry.EnsureFolder(namespace: string): Folder
+	assert(IS_SERVER, "[RemoteRegistry] EnsureFolder() must only be called on the server.")
+	assertNonEmpty(namespace, "namespace")
+
+	local root = getRoot(true)
+	local folder = root:FindFirstChild(namespace)
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = namespace
+		folder.Parent = root
+	end
+	assert(folder:IsA("Folder"), string.format("[RemoteRegistry] '%s' exists but is %s, not Folder.", namespace, folder.ClassName))
+	return folder :: Folder
+end
+
+function RemoteRegistry.EnsureEvent(namespace: string, key: string): RemoteEvent
+	return ensureRemote(namespace, key, "RemoteEvent") :: RemoteEvent
+end
+
+function RemoteRegistry.EnsureFunction(namespace: string, key: string): RemoteFunction
+	return ensureRemote(namespace, key, "RemoteFunction") :: RemoteFunction
+end
+
+function RemoteRegistry.WaitForEvent(namespace: string, key: string): RemoteEvent
+	return waitForRemote(namespace, key, "RemoteEvent") :: RemoteEvent
+end
+
+function RemoteRegistry.WaitForFunction(namespace: string, key: string): RemoteFunction
+	return waitForRemote(namespace, key, "RemoteFunction") :: RemoteFunction
+end
+
+function RemoteRegistry.Exists(namespace: string, key: string): boolean
+	if type(namespace) ~= "string" or namespace == "" or type(key) ~= "string" or key == "" then
+		return false
+	end
+	local shared = ReplicatedStorage:FindFirstChild("Shared")
+	if not shared then
+		return false
+	end
+	local remotes = shared:FindFirstChild("Remotes")
+	if not remotes then
+		return false
+	end
+	local folder = remotes:FindFirstChild(namespace)
+	if not folder then
+		return false
+	end
+	return folder:FindFirstChild(key) ~= nil
+end
+
+return RemoteRegistry
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">ec45aa575881942c179f5c87cbff6a13</UniqueId>
+					</Properties>
+				</Item>
+
+				<Item class="ModuleScript" referent="RBX759C209031C3D1528677437B3324726D">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">ClassRemotes</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Class-scoped remote registry. It declares request/confirmation events only;
+-- class and role mutation remains server-authoritative through ClassService.
+
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local RemoteRegistry = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Remotes"):WaitForChild("RemoteRegistry"))
+
+local NAMESPACE = "Class"
+
+local EVENT_NAMES: { [string]: string } = {
+	SelectClass = "Class_SelectClass",
+	SelectRole = "Class_SelectRole",
+	ClassSelected = "Class_ClassSelected",
+	RoleSelected = "Class_RoleSelected",
+}
+
+local ClassRemotes = {}
+ClassRemotes.Namespace = NAMESPACE
+ClassRemotes.EventNames = EVENT_NAMES
+ClassRemotes.EventKeys = table.freeze(table.clone(EVENT_NAMES))
+
+local IS_SERVER = RunService:IsServer()
+local eventCache: { [string]: RemoteEvent } = {}
+local ensured = false
+
+local function getRemoteName(key: string): string
+	local remoteName = EVENT_NAMES[key]
+	assert(remoteName, string.format("[ClassRemotes] Unknown event key '%s'.", tostring(key)))
+	return remoteName
+end
+
+function ClassRemotes.Ensure(): Folder
+	assert(IS_SERVER, "[ClassRemotes] Ensure() must only be called on the server.")
+	local folder = RemoteRegistry.EnsureFolder(NAMESPACE)
+	for key, remoteName in pairs(EVENT_NAMES) do
+		eventCache[key] = RemoteRegistry.EnsureEvent(NAMESPACE, remoteName)
+	end
+	ensured = true
+	return folder
+end
+
+function ClassRemotes.GetEvent(key: string): RemoteEvent
+	local remoteName = getRemoteName(key)
+	if eventCache[key] then
+		return eventCache[key]
+	end
+	if IS_SERVER and not ensured then
+		warn("[ClassRemotes] GetEvent() called on server before Ensure(); waiting for existing remote.")
+	end
+	local remote = RemoteRegistry.WaitForEvent(NAMESPACE, remoteName)
+	eventCache[key] = remote
+	return remote
+end
+
+function ClassRemotes.IsEnsured(): boolean
+	return ensured
+end
+
+return ClassRemotes
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">3f949977d98cdd4095a1ce6e1fb87762</UniqueId>
+					</Properties>
+				</Item>
+
+				<Item class="ModuleScript" referent="RBX73C233B03A3CF640DF401A3DD7FB7640">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">InventoryRemotes</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Inventory-scoped remote registry. Only read RemoteFunctions are exposed here;
+-- item grants/removals/equipment mutation stay behind validated server services.
+
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local RemoteRegistry = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Remotes"):WaitForChild("RemoteRegistry"))
+
+local NAMESPACE = "Inventory"
+
+local FUNCTION_NAMES: { [string]: string } = {
+	GetInventory = "Inventory_GetInventory",
+	GetEquipment = "Inventory_GetEquipment",
+}
+
+local InventoryRemotes = {}
+InventoryRemotes.Namespace = NAMESPACE
+InventoryRemotes.FunctionNames = FUNCTION_NAMES
+InventoryRemotes.FunctionKeys = table.freeze(table.clone(FUNCTION_NAMES))
+
+local IS_SERVER = RunService:IsServer()
+local functionCache: { [string]: RemoteFunction } = {}
+local ensured = false
+
+local function getRemoteName(key: string): string
+	local remoteName = FUNCTION_NAMES[key]
+	assert(remoteName, string.format("[InventoryRemotes] Unknown function key '%s'.", tostring(key)))
+	return remoteName
+end
+
+function InventoryRemotes.Ensure(): Folder
+	assert(IS_SERVER, "[InventoryRemotes] Ensure() must only be called on the server.")
+	local folder = RemoteRegistry.EnsureFolder(NAMESPACE)
+	for key, remoteName in pairs(FUNCTION_NAMES) do
+		functionCache[key] = RemoteRegistry.EnsureFunction(NAMESPACE, remoteName)
+	end
+	ensured = true
+	return folder
+end
+
+function InventoryRemotes.GetFunction(key: string): RemoteFunction
+	local remoteName = getRemoteName(key)
+	if functionCache[key] then
+		return functionCache[key]
+	end
+	if IS_SERVER and not ensured then
+		warn("[InventoryRemotes] GetFunction() called on server before Ensure(); waiting for existing remote.")
+	end
+	local remote = RemoteRegistry.WaitForFunction(NAMESPACE, remoteName)
+	functionCache[key] = remote
+	return remote
+end
+
+function InventoryRemotes.IsEnsured(): boolean
+	return ensured
+end
+
+return InventoryRemotes
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">86ab5fa32e870db982e3749cdc70968a</UniqueId>
+					</Properties>
+				</Item>
+</Item>
 		</Item>
 	</Item>
 	<Item class="ServerScriptService" referent="RBX926D5265E3064731B038BEBB7A3D2A0F">
@@ -7309,9 +7569,11 @@ end
 
 local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Server = ServerScriptService:WaitForChild("Server")
 local Services = Server:WaitForChild("Services")
+local Remotes = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Remotes")
 
 local PlayerDataService = require(Services:WaitForChild("PlayerDataService"))
 local StatsService = require(Services:WaitForChild("StatsService"))
@@ -7324,6 +7586,8 @@ local DungeonService = require(Services:WaitForChild("DungeonService"))
 local LootService = require(Services:WaitForChild("LootService"))
 local QuestService = require(Services:WaitForChild("QuestService"))
 local MobService = require(Services:WaitForChild("MobService"))
+local ClassRemotes = require(Remotes:WaitForChild("ClassRemotes"))
+local InventoryRemotes = require(Remotes:WaitForChild("InventoryRemotes"))
 
 PlayerDataService.Init()
 StatsService.Init(PlayerDataService)
@@ -7336,6 +7600,8 @@ LootService.Init(InventoryService)
 QuestService.Init(PlayerDataService, InventoryService)
 DungeonService.Init(PlayerDataService, PartyService, QuestService, InventoryService)
 MobService.Init(PlayerDataService, QuestService, InventoryService, LootService)
+ClassRemotes.Ensure()
+InventoryRemotes.Ensure()
 
 local function onPlayerAdded(player: Player)
 	task.spawn(function()
@@ -7371,7 +7637,117 @@ print("[GhostyRPG] Server boot complete.")
 				</Properties>
 			</Item>
 		</Item>
-	</Item>
+	
+				<Item class="Script" referent="RBX47A055DC1275D2731B93FCF302C36E7D">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">RemotesSmokeTest</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Server-only smoke test for the shared remote registry modules.
+-- Creates declared remotes through Ensure(), verifies type/name, and never fires/invokes them.
+
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+assert(RunService:IsServer(), "[RemotesSmokeTest] Must run on the server.")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Remotes = Shared:WaitForChild("Remotes")
+
+local passed = 0
+local failed = 0
+local failures: { string } = {}
+
+local function record(label: string, condition: boolean, detail: string?)
+	if condition then
+		passed += 1
+		print(string.format("[RemotesSmokeTest] [PASS] %s", label))
+	else
+		failed += 1
+		local message = string.format("%s%s", label, if detail then ": " .. detail else "")
+		table.insert(failures, message)
+		warn(string.format("[RemotesSmokeTest] [FAIL] %s", message))
+	end
+end
+
+local remoteRegistry = require(Remotes:WaitForChild("RemoteRegistry") :: ModuleScript)
+local questRemotes = require(Remotes:WaitForChild("QuestRemotes") :: ModuleScript)
+local classRemotes = require(Remotes:WaitForChild("ClassRemotes") :: ModuleScript)
+local inventoryRemotes = require(Remotes:WaitForChild("InventoryRemotes") :: ModuleScript)
+
+record("RemoteRegistry loads", type(remoteRegistry) == "table")
+record("QuestRemotes loads", type(questRemotes) == "table")
+record("ClassRemotes loads", type(classRemotes) == "table")
+record("InventoryRemotes loads", type(inventoryRemotes) == "table")
+
+local function ensureModule(label: string, module: any)
+	local ok, err = pcall(function()
+		module.Ensure()
+	end)
+	record(label .. ".Ensure()", ok, tostring(err))
+	local okAgain, errAgain = pcall(function()
+		module.Ensure()
+	end)
+	record(label .. ".Ensure() idempotent", okAgain, tostring(errAgain))
+end
+
+ensureModule("QuestRemotes", questRemotes)
+ensureModule("ClassRemotes", classRemotes)
+ensureModule("InventoryRemotes", inventoryRemotes)
+
+local function findRemote(namespace: string, remoteName: string): Instance?
+	local folder = Remotes:FindFirstChild(namespace)
+	if not folder then
+		return nil
+	end
+	return folder:FindFirstChild(remoteName)
+end
+
+local function verifyRemoteMap(namespace: string, names: { [string]: string }, expectedClassName: string)
+	for key, remoteName in pairs(names) do
+		local inst = findRemote(namespace, remoteName)
+		record(string.format("%s.%s exists", namespace, key), inst ~= nil, remoteName)
+		if inst then
+			record(string.format("%s.%s is %s", namespace, key, expectedClassName), inst.ClassName == expectedClassName, inst.ClassName)
+		end
+		local existsOk = remoteRegistry.Exists(namespace, remoteName)
+		record(string.format("RemoteRegistry.Exists(%s/%s)", namespace, remoteName), existsOk)
+	end
+end
+
+verifyRemoteMap(questRemotes.Namespace, questRemotes.EventNames, "RemoteEvent")
+verifyRemoteMap(questRemotes.Namespace, questRemotes.FunctionNames, "RemoteFunction")
+verifyRemoteMap(classRemotes.Namespace, classRemotes.EventNames, "RemoteEvent")
+verifyRemoteMap(inventoryRemotes.Namespace, inventoryRemotes.FunctionNames, "RemoteFunction")
+
+local blankOk = pcall(function()
+	remoteRegistry.EnsureEvent("", "BlankNamespaceShouldFail")
+end)
+record("RemoteRegistry rejects blank namespace", not blankOk)
+
+local missingExistsOk, missingExists = pcall(function()
+	return remoteRegistry.Exists("MissingNamespace", "MissingRemote")
+end)
+record("RemoteRegistry.Exists missing remote is safe", missingExistsOk and missingExists == false)
+
+if failed == 0 then
+	print(string.format("[RemotesSmokeTest] PASSED %d checks, 0 failures", passed))
+else
+	warn(string.format("[RemotesSmokeTest] FAILED %d passed, %d failed", passed, failed))
+	for index, failure in ipairs(failures) do
+		warn(string.format("[RemotesSmokeTest] [%d] %s", index, failure))
+	end
+end
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">9b4cb5d816d5a0fddaa6777e6f564c6c</UniqueId>
+					</Properties>
+				</Item>
+</Item>
 	<Item class="ServerStorage" referent="RBXD4EEA275775E413D931C3316D9D6F428">
 		<Properties>
 			<BinaryString name="AttributesSerialize"></BinaryString>
