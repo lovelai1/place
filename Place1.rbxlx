@@ -1900,6 +1900,11 @@ local DEFAULT_DATA: PlayerData = {
 		Armor = 0,
 		AttackPower = 0,
 		SpellPower = 0,
+		HP = 100,
+		MP = 100,
+		Attack = 10,
+		Defense = 0,
+		Speed = 10,
 	},
 	Inventory = {},
 	Equipment = {},
@@ -1921,6 +1926,7 @@ local DEFAULT_DATA: PlayerData = {
 		sfxVolume = 1.0,
 		showDamageNumbers = true,
 		autoLoot = false,
+		ResetClassAllowed = false,
 	},
 }
 
@@ -2764,6 +2770,100 @@ return InventoryValidator
 						<int64 name="SourceAssetId">-1</int64>
 						<BinaryString name="Tags"></BinaryString>
 						<UniqueId name="UniqueId">4e00990e310340f18b8c077f569b26a0</UniqueId>
+					</Properties>
+				</Item>
+				<Item class="ModuleScript" referent="RBXB9B43866093C49EEA76B83958BE6D871">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">ClassValidator</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Pure validation for GhostyRPG class and role selection.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local ClassConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"):WaitForChild("ClassConfig"))
+local RoleConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"):WaitForChild("RoleConfig"))
+
+local ClassValidator = {}
+
+export type ValidationResult = {
+	success: boolean,
+	reason: string?,
+}
+
+local function ok(): ValidationResult
+	return { success = true, reason = nil }
+end
+
+local function fail(reason: string): ValidationResult
+	return { success = false, reason = reason }
+end
+
+function ClassValidator.IsValidClass(className: string): boolean
+	return typeof(className) == "string" and ClassConfig[className] ~= nil
+end
+
+function ClassValidator.IsValidRole(roleName: string): boolean
+	return typeof(roleName) == "string" and RoleConfig[roleName] ~= nil
+end
+
+function ClassValidator.CanClassUseRole(className: string, roleName: string): ValidationResult
+	if not ClassValidator.IsValidClass(className) then
+		return fail(string.format("Class '%s' does not exist.", tostring(className)))
+	end
+	if not ClassValidator.IsValidRole(roleName) then
+		return fail(string.format("Role '%s' does not exist.", tostring(roleName)))
+	end
+
+	local classData = ClassConfig[className]
+	local availableRoles = classData.AvailableRoles
+	if type(availableRoles) ~= "table" then
+		return fail(string.format("Class '%s' has no AvailableRoles list.", className))
+	end
+
+	for _, allowedRole in ipairs(availableRoles) do
+		if allowedRole == roleName then
+			return ok()
+		end
+	end
+
+	return fail(string.format("Class '%s' cannot use role '%s'.", className, roleName))
+end
+
+function ClassValidator.CanSelectClass(data: { [string]: any }, className: string): ValidationResult
+	if not ClassValidator.IsValidClass(className) then
+		return fail(string.format("Class '%s' does not exist.", tostring(className)))
+	end
+
+	local selectedClass = data.SelectedClass
+	if type(selectedClass) == "string" and selectedClass ~= "" then
+		local settings = data.Settings
+		local resetAllowed = type(settings) == "table" and settings.ResetClassAllowed == true
+		if not resetAllowed then
+			return fail("Class is already selected and class reset is not allowed.")
+		end
+	end
+
+	return ok()
+end
+
+function ClassValidator.CanSelectRole(data: { [string]: any }, roleName: string): ValidationResult
+	local selectedClass = data.SelectedClass
+	if type(selectedClass) ~= "string" or selectedClass == "" then
+		return fail("Select a class before choosing a role.")
+	end
+
+	return ClassValidator.CanClassUseRole(selectedClass, roleName)
+end
+
+return ClassValidator
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">2bfcbf43838e4d629c6c60e3bae62b60</UniqueId>
 					</Properties>
 				</Item>
 			</Item>
@@ -3623,6 +3723,310 @@ return InventoryService
 						<UniqueId name="UniqueId">a89414b67eca401c92f1a3fa1f7a5b71</UniqueId>
 					</Properties>
 				</Item>
+				<Item class="ModuleScript" referent="RBX9CE6E3F6134845588B888640DE6204F0">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">StatsService</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Server-authoritative stat calculation for GhostyRPG.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local SharedConfig = ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config")
+local ClassConfig = require(SharedConfig:WaitForChild("ClassConfig"))
+local RoleConfig = require(SharedConfig:WaitForChild("RoleConfig"))
+local StatFormulas = require(SharedConfig:WaitForChild("StatFormulas"))
+local ItemConfig = require(SharedConfig:WaitForChild("ItemConfig"))
+
+local StatsService = {}
+
+local playerDataService: any = nil
+local initialized = false
+
+local BASE_PRIMARY_STATS = {
+	Strength = 5,
+	Agility = 5,
+	Intellect = 5,
+	Stamina = 8,
+	Spirit = 5,
+}
+
+local function copyBasePrimaryStats(): { [string]: number }
+	local stats = {}
+	for statName, value in pairs(BASE_PRIMARY_STATS) do
+		stats[statName] = value
+	end
+	return stats
+end
+
+local function addNumber(stats: { [string]: number }, key: string, amount: any)
+	if type(amount) == "number" then
+		stats[key] = (stats[key] or 0) + amount
+	end
+end
+
+local function applyBonuses(stats: { [string]: number }, bonuses: any)
+	if type(bonuses) ~= "table" then
+		return
+	end
+	for statName, amount in pairs(bonuses) do
+		if type(statName) == "string" and type(amount) == "number" then
+			addNumber(stats, statName, amount)
+		end
+	end
+end
+
+local function getEquipmentItemId(equipmentEntry: any): string?
+	if type(equipmentEntry) == "string" then
+		return equipmentEntry
+	end
+	if type(equipmentEntry) == "table" and type(equipmentEntry.itemId) == "string" then
+		return equipmentEntry.itemId
+	end
+	return nil
+end
+
+local function addEquipmentBonuses(stats: { [string]: number }, equipment: any)
+	if type(equipment) ~= "table" then
+		return
+	end
+
+	for _, equipmentEntry in pairs(equipment) do
+		local itemId = getEquipmentItemId(equipmentEntry)
+		if itemId then
+			local itemDef = ItemConfig.GetItem(itemId)
+			if itemDef then
+				applyBonuses(stats, itemDef.statBonuses)
+			end
+		end
+	end
+end
+
+function StatsService.Init(newPlayerDataService: any)
+	if initialized then
+		warn("[StatsService] Init called more than once; ignoring duplicate call.")
+		return
+	end
+
+	assert(newPlayerDataService, "StatsService.Init requires PlayerDataService.")
+	assert(newPlayerDataService.GetData, "StatsService.Init requires PlayerDataService.GetData.")
+	assert(newPlayerDataService.ScheduleSave, "StatsService.Init requires PlayerDataService.ScheduleSave.")
+
+	playerDataService = newPlayerDataService
+	initialized = true
+	print("[StatsService] Initialized.")
+end
+
+function StatsService.CalculateFromData(data: { [string]: any }): { [string]: number }
+	local level = if type(data.Level) == "number" then math.max(1, data.Level) else 1
+	local selectedClass = if type(data.SelectedClass) == "string" then data.SelectedClass else ""
+	local selectedRole = if type(data.SelectedRole) == "string" then data.SelectedRole else ""
+
+	local stats = copyBasePrimaryStats()
+	stats.Level = level
+
+	local classData = ClassConfig[selectedClass]
+	if classData then
+		stats.MaxHealth = classData.BaseHealth or 100
+		stats.MaxResource = classData.BaseResource or 100
+		stats.Armor = classData.BaseArmor or 0
+		stats.AttackPower = classData.BaseAttackPower or 0
+		stats.SpellPower = classData.BaseSpellPower or 0
+	else
+		stats.MaxHealth = 100
+		stats.MaxResource = 100
+		stats.Armor = 0
+		stats.AttackPower = 10
+		stats.SpellPower = 0
+	end
+
+	-- Level growth gives stable progression even before gear/class tuning is complete.
+	local growth = math.max(0, level - 1)
+	stats.Stamina += growth * 2
+	stats.Strength += growth
+	stats.Agility += growth
+	stats.Intellect += growth
+	stats.Spirit += growth
+
+	local roleData = RoleConfig[selectedRole]
+	if roleData then
+		applyBonuses(stats, roleData.BaseStatBonuses)
+	end
+
+	addEquipmentBonuses(stats, data.Equipment)
+
+	local multipliers = if classData and type(classData.StatMultipliers) == "table" then classData.StatMultipliers else {}
+	local healthPerStamina = multipliers.HealthPerStamina or StatFormulas.HealthPerStamina or 10
+	local manaPerIntellect = multipliers.ManaPerIntellect or StatFormulas.ManaPerIntellect or 10
+	local attackPerStrength = multipliers.AttackPowerPerStrength or StatFormulas.AttackPowerPerStrength or 1
+	local attackPerAgility = multipliers.AttackPowerPerAgility or StatFormulas.AttackPowerPerAgility or 0
+	local spellPerIntellect = multipliers.SpellPowerPerIntellect or StatFormulas.SpellPowerPerIntellect or 1
+	local armorPerAgility = multipliers.ArmorPerAgility or 0
+	local critPerAgility = multipliers.CritChancePerAgility or StatFormulas.CritChancePerAgility or 0
+	local critPerIntellect = multipliers.CritChancePerIntellect or StatFormulas.CritChancePerIntellect or 0
+
+	stats.MaxHealth += stats.Stamina * healthPerStamina
+	stats.MaxResource += stats.Intellect * manaPerIntellect
+	stats.AttackPower += stats.Strength * attackPerStrength + stats.Agility * attackPerAgility
+	stats.SpellPower += stats.Intellect * spellPerIntellect
+	stats.Armor += stats.Agility * armorPerAgility
+	stats.CritChance = (StatFormulas.BaseCritChance or 5) + (stats.Agility * critPerAgility) + (stats.Intellect * critPerIntellect)
+	stats.HealingPower = stats.SpellPower + (stats.Spirit * (StatFormulas.HealingBonusPerSpirit or 0))
+
+	-- Simple aliases for future UI/combat modules while canonical RPG stats remain above.
+	stats.HP = stats.MaxHealth
+	stats.MP = stats.MaxResource
+	stats.Attack = stats.AttackPower
+	stats.Defense = stats.Armor
+	stats.Speed = 10
+
+	for statName, value in pairs(stats) do
+		stats[statName] = math.max(0, math.floor(value))
+	end
+
+	return stats
+end
+
+function StatsService.Recalculate(player: Player): { [string]: number }?
+	assert(initialized and playerDataService, "StatsService.Recalculate requires Init first.")
+
+	local data = playerDataService.GetData(player)
+	if not data then
+		warn(string.format("[StatsService] No data for %s; cannot recalculate.", player.Name))
+		return nil
+	end
+
+	local stats = StatsService.CalculateFromData(data)
+	data.Stats = stats
+	playerDataService.ScheduleSave(player)
+	return stats
+end
+
+function StatsService.GetStats(player: Player): { [string]: number }?
+	assert(initialized and playerDataService, "StatsService.GetStats requires Init first.")
+
+	local data = playerDataService.GetData(player)
+	if not data then
+		return nil
+	end
+	return data.Stats
+end
+
+return StatsService
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">4c0b3eec629742e2ae2c377a75b66414</UniqueId>
+					</Properties>
+				</Item>
+				<Item class="ModuleScript" referent="RBXD56FF6E591AA423A8BD34B33DDD6CD8C">
+					<Properties>
+						<BinaryString name="AttributesSerialize"></BinaryString>
+						<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+						<bool name="DefinesCapabilities">false</bool>
+						<UniqueId name="HistoryId">00000000000000000000000000000000</UniqueId>
+						<string name="Name">ClassService</string>
+						<ProtectedString name="Source"><![CDATA[--!strict
+-- Server-authoritative class and role selection for GhostyRPG.
+
+local ServerScriptService = game:GetService("ServerScriptService")
+local ClassValidator = require(ServerScriptService:WaitForChild("Server"):WaitForChild("Validators"):WaitForChild("ClassValidator"))
+
+local ClassService = {}
+
+local playerDataService: any = nil
+local statsService: any = nil
+local initialized = false
+
+local function assertInitialized()
+	assert(initialized and playerDataService and statsService, "ClassService requires Init(playerDataService, statsService) before use.")
+end
+
+function ClassService.Init(newPlayerDataService: any, newStatsService: any)
+	if initialized then
+		warn("[ClassService] Init called more than once; ignoring duplicate call.")
+		return
+	end
+
+	assert(newPlayerDataService, "ClassService.Init requires PlayerDataService.")
+	assert(newPlayerDataService.GetData, "ClassService.Init requires PlayerDataService.GetData.")
+	assert(newPlayerDataService.ScheduleSave, "ClassService.Init requires PlayerDataService.ScheduleSave.")
+	assert(newStatsService, "ClassService.Init requires StatsService.")
+	assert(newStatsService.Recalculate, "ClassService.Init requires StatsService.Recalculate.")
+
+	playerDataService = newPlayerDataService
+	statsService = newStatsService
+	initialized = true
+	print("[ClassService] Initialized.")
+end
+
+function ClassService.SelectClass(player: Player, className: string): (boolean, string?)
+	assertInitialized()
+
+	local data = playerDataService.GetData(player)
+	if not data then
+		return false, "Player data is unavailable."
+	end
+
+	local validation = ClassValidator.CanSelectClass(data, className)
+	if not validation.success then
+		return false, validation.reason
+	end
+
+	data.SelectedClass = className
+	data.SelectedRole = ""
+	statsService.Recalculate(player)
+	playerDataService.ScheduleSave(player)
+	return true, nil
+end
+
+function ClassService.SelectRole(player: Player, roleName: string): (boolean, string?)
+	assertInitialized()
+
+	local data = playerDataService.GetData(player)
+	if not data then
+		return false, "Player data is unavailable."
+	end
+
+	local validation = ClassValidator.CanSelectRole(data, roleName)
+	if not validation.success then
+		return false, validation.reason
+	end
+
+	data.SelectedRole = roleName
+	statsService.Recalculate(player)
+	playerDataService.ScheduleSave(player)
+	return true, nil
+end
+
+function ClassService.GetClass(player: Player): string?
+	assertInitialized()
+	local data = playerDataService.GetData(player)
+	if not data or type(data.SelectedClass) ~= "string" or data.SelectedClass == "" then
+		return nil
+	end
+	return data.SelectedClass
+end
+
+function ClassService.GetRole(player: Player): string?
+	assertInitialized()
+	local data = playerDataService.GetData(player)
+	if not data or type(data.SelectedRole) ~= "string" or data.SelectedRole == "" then
+		return nil
+	end
+	return data.SelectedRole
+end
+
+return ClassService
+]]></ProtectedString>
+						<int64 name="SourceAssetId">-1</int64>
+						<BinaryString name="Tags"></BinaryString>
+						<UniqueId name="UniqueId">5f4412b9cc5c44ecba26e3187b29bf73</UniqueId>
+					</Properties>
+				</Item>
 			</Item>
 			<Item class="Script" referent="RBXDE5EC164C1F244C3B1632F260C99FC90">
 				<Properties>
@@ -3660,8 +4064,11 @@ require(Shared:WaitForChild("Remotes"):WaitForChild("QuestRemotes") :: ModuleScr
 require(Server:WaitForChild("Config"):WaitForChild("QuestsServerConfig") :: ModuleScript)
 require(Server:WaitForChild("Validators"):WaitForChild("QuestValidator") :: ModuleScript)
 require(Server:WaitForChild("Validators"):WaitForChild("InventoryValidator") :: ModuleScript)
+local classValidator = require(Server:WaitForChild("Validators"):WaitForChild("ClassValidator") :: ModuleScript)
 local playerDataService = require(Server:WaitForChild("Services"):WaitForChild("PlayerDataService") :: ModuleScript)
 local inventoryService = require(Server:WaitForChild("Services"):WaitForChild("InventoryService") :: ModuleScript)
+local statsService = require(Server:WaitForChild("Services"):WaitForChild("StatsService") :: ModuleScript)
+local classService = require(Server:WaitForChild("Services"):WaitForChild("ClassService") :: ModuleScript)
 require(Server:WaitForChild("Services"):WaitForChild("QuestService") :: ModuleScript)
 
 for _, methodName in ipairs({ "Init", "LoadPlayer", "SavePlayer", "ScheduleSave", "GetData", "UpdateData", "IsLoaded", "ReleasePlayer" }) do
@@ -3670,6 +4077,18 @@ end
 
 for _, methodName in ipairs({ "Init", "AddItem", "RemoveItem", "HasItem", "GetInventory", "EquipItem", "UnequipSlot", "GetEquipment" }) do
 	record(string.format("InventoryService.%s", methodName), type(inventoryService[methodName]) == "function")
+end
+
+for _, methodName in ipairs({ "IsValidClass", "IsValidRole", "CanSelectClass", "CanSelectRole", "CanClassUseRole" }) do
+	record(string.format("ClassValidator.%s", methodName), type(classValidator[methodName]) == "function")
+end
+
+for _, methodName in ipairs({ "Init", "Recalculate", "CalculateFromData", "GetStats" }) do
+	record(string.format("StatsService.%s", methodName), type(statsService[methodName]) == "function")
+end
+
+for _, methodName in ipairs({ "Init", "SelectClass", "SelectRole", "GetClass", "GetRole" }) do
+	record(string.format("ClassService.%s", methodName), type(classService[methodName]) == "function")
 end
 
 for _, itemId in ipairs({ "item_health_potion", "item_mana_potion", "item_mistleaf", "item_goblin_dagger", "item_crypt_key", "item_iron_guard_vest", "item_bone_fragment", "starter_sword", "starter_staff", "starter_shield", "copper_ore", "empty_vial" }) do
@@ -3685,12 +4104,17 @@ else
 	record("PlayerDataConfig.DeepCopyDefault", false, "failed or returned non-table")
 end
 
+local fallbackStats = statsService.CalculateFromData({ Level = 1, SelectedClass = "", SelectedRole = "", Equipment = {} })
+for _, key in ipairs({ "MaxHealth", "MaxResource", "AttackPower", "Armor", "HP", "MP", "Attack", "Defense", "Speed" }) do
+	record(string.format("StatsService fallback has %s", key), type(fallbackStats[key]) == "number")
+end
+
 for _, line in ipairs(results) do
 	print("[GhostyRPG Smoke] " .. line)
 end
 
 if allPassed then
-	print("[GhostyRPG Smoke] All quest/player-data/inventory foundation checks passed.")
+	print("[GhostyRPG Smoke] All foundation checks passed.")
 else
 	warn("[GhostyRPG Smoke] One or more checks failed.")
 end
@@ -3718,15 +4142,22 @@ local Services = Server:WaitForChild("Services")
 
 local PlayerDataService = require(Services:WaitForChild("PlayerDataService"))
 local InventoryService = require(Services:WaitForChild("InventoryService"))
+local StatsService = require(Services:WaitForChild("StatsService"))
+local ClassService = require(Services:WaitForChild("ClassService"))
 local QuestService = require(Services:WaitForChild("QuestService"))
 
 PlayerDataService.Init()
 InventoryService.Init(PlayerDataService)
+StatsService.Init(PlayerDataService)
+ClassService.Init(PlayerDataService, StatsService)
 QuestService.Init(PlayerDataService, InventoryService)
 
 local function onPlayerAdded(player: Player)
 	task.spawn(function()
 		PlayerDataService.LoadPlayer(player)
+		if PlayerDataService.IsLoaded(player) then
+			StatsService.Recalculate(player)
+		end
 	end)
 end
 
