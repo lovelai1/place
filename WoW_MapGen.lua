@@ -22,6 +22,13 @@ local btnBuild  = toolbar:CreateButton(
 )
 btnBuild.ClickableWhenViewportHidden = true
 
+local btnRebuild = toolbar:CreateButton(
+    "✨ Rebuild Map",
+    "Clear existing zones and build a fresh full map",
+    "rbxassetid://0"
+)
+btnRebuild.ClickableWhenViewportHidden = true
+
 local btnClear  = toolbar:CreateButton(
     "🗑 Clear Map",
     "Remove all generated zone folders from workspace",
@@ -31,6 +38,7 @@ btnClear.ClickableWhenViewportHidden = true
 
 -- ── State ────────────────────────────────────────────────────────
 local isRunning = false
+local forceRebuild = false
 
 local ZONE_FOLDERS = {
     "Highgard_Zone1",
@@ -41,21 +49,31 @@ local ZONE_FOLDERS = {
     "FensOfDespair_Zone6",
 }
 
--- ── Clear helper ─────────────────────────────────────────────────
-btnClear.Click:Connect(function()
-    if isRunning then return end
+local function clearGeneratedMap()
     local removed = 0
     for _, name in ipairs(ZONE_FOLDERS) do
         local f = workspace:FindFirstChild(name)
         if f then f:Destroy(); removed += 1 end
     end
-    -- Also clean up Lighting children added by Zone 7
+
+    local lighting = game:GetService("Lighting")
     local toRemove = {"Atmosphere","Sky","ColorCorrectionEffect","BloomEffect","SunRaysEffect","DepthOfFieldEffect"}
-    for _, childName in ipairs(toRemove) do
-        local c = game:GetService("Lighting"):FindFirstChildOfClass(childName)
-        if c then c:Destroy() end
+    for _, className in ipairs(toRemove) do
+        for _, obj in ipairs(lighting:GetChildren()) do
+            if obj.ClassName == className then
+                obj:Destroy()
+            end
+        end
     end
+
     print(string.format("[HighgardPlugin] 🗑 Cleared %d zone folders.", removed))
+    return removed
+end
+
+-- ── Clear helper ─────────────────────────────────────────────────
+btnClear.Click:Connect(function()
+    if isRunning then return end
+    clearGeneratedMap()
     btnClear:SetActive(false)
 end)
 
@@ -5669,7 +5687,7 @@ local ZONE_ORDER = {
     "Zone7_Environment",
 }
 
-btnBuild.Click:Connect(function()
+local function runBuild()
     if isRunning then
         warn("[HighgardPlugin] Already building — please wait.")
         return
@@ -5699,7 +5717,7 @@ btnBuild.Click:Connect(function()
             Zone6_FensOfDespair = "FensOfDespair_Zone6",
         }
         local fName = folderNames[zoneName]
-        if fName and workspace:FindFirstChild(fName) then
+        if (not forceRebuild) and fName and workspace:FindFirstChild(fName) then
             print(string.format("  ⏭  %s already exists, skipping.", fName))
             skipped += 1
         else
@@ -5740,6 +5758,20 @@ btnBuild.Click:Connect(function()
 
     isRunning = false
     btnBuild:SetActive(false)
+end
+
+btnBuild.Click:Connect(runBuild)
+
+btnRebuild.Click:Connect(function()
+    if isRunning then
+        warn("[HighgardPlugin] Already building — please wait.")
+        return
+    end
+
+    forceRebuild = true
+    clearGeneratedMap()
+    runBuild()
+    forceRebuild = false
 end)
 
 print("[HighgardPlugin] ✅ Plugin loaded — click '🗺 Build Map' in the Plugins toolbar.")
