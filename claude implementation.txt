@@ -1,0 +1,996 @@
+-- ╔══════════════════════════════════════════════════════════════════╗
+-- ║         СИСТЕМА СТАТОВ — СЕРВЕРНЫЙ СКРИПТ                       ║
+-- ║   Вставить в: ServerScriptService > StatsServer (Script)         ║
+-- ╚══════════════════════════════════════════════════════════════════╝
+
+local Players = game:GetService("Players")
+local DataStoreService = game:GetService("DataStoreService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- ── Настройки ────────────────────────────────────────────────────────
+local MAX_LEVEL = 100
+local POINTS_PER_LEVEL = 3
+local BASE_HEALTH = 100
+local HEALTH_PER_DEFENSE = 5   -- хп за каждое очко Defense
+local DATA_KEY_PREFIX = "StatsV1_"
+
+-- Таблица опыта: сколько нужно для следующего уровня
+-- Формула: нужно = 100 * уровень^1.5
+local function getExpRequired(level)
+	return math.floor(100 * (level ^ 1.5))
+end
+
+-- ── DataStore ─────────────────────────────────────────────────────────
+local StatsStore = DataStoreService:GetDataStore("PlayerStatsStore_V1")
+
+-- ── RemoteEvents / RemoteFunctions ───────────────────────────────────
+local Remotes = Instance.new("Folder")
+Remotes.Name = "StatsRemotes"
+Remotes.Parent = ReplicatedStorage
+
+local function makeRemoteEvent(name)
+	local r = Instance.new("RemoteEvent")
+	r.Name = name
+	r.Parent = Remotes
+	return r
+end
+
+local function makeRemoteFunction(name)
+	local r = Instance.new("RemoteFunction")
+	r.Name = name
+	r.Parent = Remotes
+	return r
+end
+
+local UpdateStatsUI   = makeRemoteEvent("UpdateStatsUI")    -- сервер → клиент
+local SpendPoint      = makeRemoteEvent("SpendPoint")       -- клиент → сервер
+local GetPlayerStats  = makeRemoteFunction("GetPlayerStats") -- клиент запрашивает данные
+local GiveExp         = makeRemoteEvent("GiveExp")          -- внутренний (моб → сервер)
+
+-- ── Хранилище данных игроков в памяти ────────────────────────────────
+local playerData = {}
+
+local defaultData = {
+	level      = 1,
+	exp        = 0,
+	freePoints = 0,
+	stats = {
+		Melee     = 0,
+		Defense   = 0,
+		Sword     = 0,
+		Gun       = 0,
+		BloxFruit = 0,
+	}
+}
+
+-- ── Загрузка данных ───────────────────────────────────────────────────
+local function loadData(player)
+	local key = DATA_KEY_PREFIX .. player.UserId
+	local success, data = pcall(function()
+		return StatsStore:GetAsync(key)
+	end)
+
+	if success and data then
+		-- Глубокое объединение: защита от пропущенных полей при обновлении игры
+		local merged = {
+			level      = data.level      or 1,
+			exp        = data.exp        or 0,
+			freePoints = data.freePoints or 0,
+			stats = {
+				Melee     = (data.stats and data.stats.Melee)     or 0,
+				Defense   = (data.stats and data.stats.Defense)   or 0,
+				Sword     = (data.stats and data.stats.Sword)     or 0,
+				Gun       = (data.stats and data.stats.Gun)       or 0,
+				BloxFruit = (data.stats and data.stats.BloxFruit) or 0,
+			}
+		}
+		playerData[player.UserId] = merged
+	else
+		-- Новый игрок — копируем дефолт
+		playerData[player.UserId] = {
+			level      = 1,
+			exp        = 0,
+			freePoints = 0,
+			stats = {
+				Melee     = 0,
+				Defense   = 0,
+				Sword     = 0,
+				Gun       = 0,
+				BloxFruit = 0,
+			}
+		}
+		if not success then
+			warn("[StatsSystem] Ошибка загрузки данных " .. player.Name .. ": " .. tostring(data))
+		end
+	end
+end
+
+-- ── Сохранение данных ─────────────────────────────────────────────────
+local function saveData(player)
+	local data = playerData[player.UserId]
+	if not data then return end
+	local key = DATA_KEY_PREFIX .. player.UserId
+	local success, err = pcall(function()
+		StatsStore:SetAsync(key, data)
+	end)
+	if not success then
+		warn("[StatsSystem] Ошибка сохранения " .. player.Name .. ": " .. tostring(err))
+	end
+end
+
+-- ── Применить хп к персонажу ──────────────────────────────────────────
+local function applyHealth(player)
+	local data = playerData[player.UserId]
+	if not data then return end
+	local character = player.Character
+	if not character then return end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return end
+
+	local maxHp = BASE_HEALTH + (data.stats.Defense * HEALTH_PER_DEFENSE)
+	humanoid.MaxHealth = maxHp
+	humanoid.Health = maxHp  -- восстанавливаем хп при изменении статов
+end
+
+-- ── Отправить актуальные данные клиенту ───────────────────────────────
+local function syncToClient(player)
+	local data = playerData[player.UserId]
+	if not data then return end
+	UpdateStatsUI:FireClient(player, {
+		level      = data.level,
+		exp        = data.exp,
+		expNeeded  = getExpRequired(data.level),
+		freePoints = data.freePoints,
+		stats      = data.stats,
+		maxLevel   = MAX_LEVEL,
+	})
+end
+
+-- ── Левелап ───────────────────────────────────────────────────────────
+local function checkLevelUp(player)
+	local data = playerData[player.UserId]
+	if not data then return end
+
+	while data.level < MAX_LEVEL do
+		local needed = getExpRequired(data.level)
+		if data.exp >= needed then
+			data.exp = data.exp - needed
+			data.level = data.level + 1
+			data.freePoints = data.freePoints + POINTS_PER_LEVEL
+
+			-- Уведомление в чат
+			game:GetService("StarterGui") -- только для справки
+			player:LoadCharacter() -- не вызываем, просто применяем хп
+			applyHealth(player)
+
+			-- Оповещение через отдельный эвент (клиент покажет анимацию)
+			UpdateStatsUI:FireClient(player, {
+				levelUpNotify = true,
+				newLevel      = data.level,
+			})
+		else
+			break
+		end
+	end
+
+	-- Если достигнут кап — лишний опыт обнуляем
+	if data.level >= MAX_LEVEL then
+		data.exp = 0
+	end
+end
+
+-- ── Выдача опыта (вызывается из скрипта мобов) ────────────────────────
+GiveExp.OnServerEvent:Connect(function(player, amount)
+	local data = playerData[player.UserId]
+	if not data or data.level >= MAX_LEVEL then return end
+	if typeof(amount) ~= "number" or amount <= 0 or amount > 100000 then return end
+
+	data.exp = data.exp + math.floor(amount)
+	checkLevelUp(player)
+	syncToClient(player)
+end)
+
+-- ── Трата очков ───────────────────────────────────────────────────────
+local VALID_STATS = {Melee = true, Defense = true, Sword = true, Gun = true, BloxFruit = true}
+
+SpendPoint.OnServerEvent:Connect(function(player, statName)
+	local data = playerData[player.UserId]
+	if not data then return end
+	if not VALID_STATS[statName] then return end
+	if data.freePoints <= 0 then return end
+
+	data.freePoints = data.freePoints - 1
+	data.stats[statName] = data.stats[statName] + 1
+
+	applyHealth(player)
+	syncToClient(player)
+	saveData(player)  -- сохраняем после каждой траты
+end)
+
+-- ── RemoteFunction: отдать данные по запросу ─────────────────────────
+GetPlayerStats.OnServerInvoke = function(player)
+	local data = playerData[player.UserId]
+	if not data then return nil end
+	return {
+		level      = data.level,
+		exp        = data.exp,
+		expNeeded  = getExpRequired(data.level),
+		freePoints = data.freePoints,
+		stats      = data.stats,
+		maxLevel   = MAX_LEVEL,
+	}
+end
+
+-- ── Публичная функция для мобов / других скриптов ─────────────────────
+-- Использование: require(script.Parent.StatsServer):getDamageMultiplier(player, "Melee")
+local StatsAPI = {}
+
+function StatsAPI.getDamageMultiplier(player, statType)
+	local data = playerData[player and player.UserId]
+	if not data then return 1 end
+	local points = data.stats[statType] or 0
+	-- Каждое очко даёт +2% урона
+	return 1 + (points * 0.02)
+end
+
+function StatsAPI.giveExpToPlayer(player, amount)
+	if not player or not amount then return end
+	GiveExp:FireServer(player, amount) -- нет, стреляем напрямую
+	-- Для серверных скриптов — вызываем внутреннюю логику:
+	local data = playerData[player.UserId]
+	if not data or data.level >= MAX_LEVEL then return end
+	data.exp = data.exp + math.floor(amount)
+	checkLevelUp(player)
+	syncToClient(player)
+end
+
+-- ── События игрока ────────────────────────────────────────────────────
+Players.PlayerAdded:Connect(function(player)
+	loadData(player)
+
+	-- Ждём появления персонажа
+	player.CharacterAdded:Connect(function()
+		task.wait(0.5) -- небольшая задержка для загрузки Humanoid
+		applyHealth(player)
+		syncToClient(player)
+	end)
+
+	-- Первичная синхронизация если персонаж уже есть
+	if player.Character then
+		task.wait(0.5)
+		applyHealth(player)
+		syncToClient(player)
+	end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	saveData(player)
+	playerData[player.UserId] = nil
+end)
+
+-- Сохранение при вылете сервера
+game:BindToClose(function()
+	for _, player in ipairs(Players:GetPlayers()) do
+		saveData(player)
+	end
+	task.wait(1) -- даём время на сохранение
+end)
+
+-- Автосохранение каждые 60 секунд
+task.spawn(function()
+	while true do
+		task.wait(60)
+		for _, player in ipairs(Players:GetPlayers()) do
+			saveData(player)
+		end
+	end
+end)
+
+return StatsAPI
+-- ╔══════════════════════════════════════════════════════════════════╗
+-- ║         СИСТЕМА СТАТОВ — КЛИЕНТСКИЙ СКРИПТ + GUI                 ║
+-- ║   Вставить в: StarterPlayerScripts > StatsClient (LocalScript)   ║
+-- ╚══════════════════════════════════════════════════════════════════╝
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- ── Ждём загрузки RemoteEvents ────────────────────────────────────────
+local Remotes       = ReplicatedStorage:WaitForChild("StatsRemotes", 15)
+local UpdateStatsUI = Remotes:WaitForChild("UpdateStatsUI")
+local SpendPoint    = Remotes:WaitForChild("SpendPoint")
+local GetPlayerStats = Remotes:WaitForChild("GetPlayerStats")
+
+-- ── Цвета и стиль (тема Blox Fruits) ─────────────────────────────────
+local COLORS = {
+	bg          = Color3.fromRGB(10,  14,  26),   -- тёмно-синий фон
+	panel       = Color3.fromRGB(18,  24,  45),   -- панель
+	panelBorder = Color3.fromRGB(40,  80, 160),   -- синяя рамка
+	accent      = Color3.fromRGB(30, 120, 255),   -- основной синий акцент
+	accentGlow  = Color3.fromRGB(80, 160, 255),
+	gold        = Color3.fromRGB(255, 200,  50),  -- золото для уровня
+	expBar      = Color3.fromRGB(50, 200, 100),   -- зелёная полоска опыта
+	expBg       = Color3.fromRGB(20,  50,  30),
+	text        = Color3.fromRGB(220, 230, 255),
+	textDim     = Color3.fromRGB(100, 120, 160),
+	btnNormal   = Color3.fromRGB(25,  60, 140),
+	btnHover    = Color3.fromRGB(40,  90, 200),
+	btnPress    = Color3.fromRGB(15,  40, 100),
+	statColors  = {
+		Melee     = Color3.fromRGB(255, 80,  80),
+		Defense   = Color3.fromRGB(80, 160, 255),
+		Sword     = Color3.fromRGB(200, 200, 50),
+		Gun       = Color3.fromRGB(180, 100, 255),
+		BloxFruit = Color3.fromRGB(50, 220, 160),
+	},
+	statIcons = {
+		Melee     = "⚔",
+		Defense   = "🛡",
+		Sword     = "🗡",
+		Gun       = "🔫",
+		BloxFruit = "🍎",
+	}
+}
+
+-- ── Состояние клиента ─────────────────────────────────────────────────
+local currentData = {
+	level = 1, exp = 0, expNeeded = 100, freePoints = 0, maxLevel = 100,
+	stats = {Melee=0, Defense=0, Sword=0, Gun=0, BloxFruit=0}
+}
+local guiVisible = false
+
+-- ── СОЗДАНИЕ GUI ──────────────────────────────────────────────────────
+local function createGui()
+	-- Главный ScreenGui
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "StatsGui"
+	screenGui.ResetOnSpawn = false
+	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	screenGui.Parent = playerGui
+
+	-- ── HUD: Левел + EXP бар (всегда виден) ──────────────────────────
+	local hud = Instance.new("Frame")
+	hud.Name = "HUD"
+	hud.Size = UDim2.new(0, 320, 0, 64)
+	hud.Position = UDim2.new(0.5, -160, 1, -80)
+	hud.BackgroundColor3 = COLORS.panel
+	hud.BackgroundTransparency = 0.15
+	hud.BorderSizePixel = 0
+	hud.Parent = screenGui
+
+	local hudCorner = Instance.new("UICorner")
+	hudCorner.CornerRadius = UDim.new(0, 12)
+	hudCorner.Parent = hud
+
+	local hudStroke = Instance.new("UIStroke")
+	hudStroke.Color = COLORS.panelBorder
+	hudStroke.Thickness = 1.5
+	hudStroke.Transparency = 0.5
+	hudStroke.Parent = hud
+
+	-- Уровень в HUD
+	local hudLevel = Instance.new("TextLabel")
+	hudLevel.Name = "HudLevel"
+	hudLevel.Size = UDim2.new(0, 80, 1, 0)
+	hudLevel.Position = UDim2.new(0, 8, 0, 0)
+	hudLevel.BackgroundTransparency = 1
+	hudLevel.TextColor3 = COLORS.gold
+	hudLevel.Font = Enum.Font.GothamBold
+	hudLevel.TextSize = 22
+	hudLevel.Text = "Lv.1"
+	hudLevel.TextXAlignment = Enum.TextXAlignment.Left
+	hudLevel.Parent = hud
+
+	-- EXP label
+	local expLabel = Instance.new("TextLabel")
+	expLabel.Name = "ExpLabel"
+	expLabel.Size = UDim2.new(1, -90, 0, 18)
+	expLabel.Position = UDim2.new(0, 85, 0, 8)
+	expLabel.BackgroundTransparency = 1
+	expLabel.TextColor3 = COLORS.textDim
+	expLabel.Font = Enum.Font.Gotham
+	expLabel.TextSize = 12
+	expLabel.Text = "EXP: 0 / 100"
+	expLabel.TextXAlignment = Enum.TextXAlignment.Left
+	expLabel.Parent = hud
+
+	-- EXP bar фон
+	local expBarBg = Instance.new("Frame")
+	expBarBg.Name = "ExpBarBg"
+	expBarBg.Size = UDim2.new(1, -90, 0, 10)
+	expBarBg.Position = UDim2.new(0, 85, 0, 30)
+	expBarBg.BackgroundColor3 = COLORS.expBg
+	expBarBg.BorderSizePixel = 0
+	expBarBg.Parent = hud
+	Instance.new("UICorner").CornerRadius = UDim.new(1, 0)
+	Instance.new("UICorner").Parent = expBarBg
+
+	-- EXP bar заполнение
+	local expBar = Instance.new("Frame")
+	expBar.Name = "ExpBar"
+	expBar.Size = UDim2.new(0, 0, 1, 0)
+	expBar.Position = UDim2.new(0, 0, 0, 0)
+	expBar.BackgroundColor3 = COLORS.expBar
+	expBar.BorderSizePixel = 0
+	expBar.Parent = expBarBg
+	local expBarCorner = Instance.new("UICorner")
+	expBarCorner.CornerRadius = UDim.new(1, 0)
+	expBarCorner.Parent = expBar
+
+	-- Свободные очки индикатор
+	local pointsHud = Instance.new("TextLabel")
+	pointsHud.Name = "PointsHud"
+	pointsHud.Size = UDim2.new(1, -90, 0, 14)
+	pointsHud.Position = UDim2.new(0, 85, 0, 44)
+	pointsHud.BackgroundTransparency = 1
+	pointsHud.TextColor3 = COLORS.gold
+	pointsHud.Font = Enum.Font.GothamBold
+	pointsHud.TextSize = 12
+	pointsHud.Text = ""
+	pointsHud.TextXAlignment = Enum.TextXAlignment.Left
+	pointsHud.Parent = hud
+
+	-- ── Кнопка открытия панели статов ────────────────────────────────
+	local toggleBtn = Instance.new("TextButton")
+	toggleBtn.Name = "ToggleBtn"
+	toggleBtn.Size = UDim2.new(0, 44, 0, 44)
+	toggleBtn.Position = UDim2.new(0, 8, 0.5, -22)
+	toggleBtn.BackgroundColor3 = COLORS.btnNormal
+	toggleBtn.BorderSizePixel = 0
+	toggleBtn.Text = "📊"
+	toggleBtn.TextSize = 22
+	toggleBtn.Font = Enum.Font.GothamBold
+	toggleBtn.TextColor3 = COLORS.text
+	toggleBtn.Parent = hud -- теперь в середине HUD
+
+	-- ждём, нет — делаем кнопку отдельно
+	toggleBtn.Parent = screenGui
+	toggleBtn.Size = UDim2.new(0, 50, 0, 50)
+	toggleBtn.Position = UDim2.new(0, 20, 0.5, -25)
+	Instance.new("UICorner").CornerRadius = UDim.new(0, 10)
+	Instance.new("UICorner").Parent = toggleBtn
+
+	local toggleStroke = Instance.new("UIStroke")
+	toggleStroke.Color = COLORS.accentGlow
+	toggleStroke.Thickness = 2
+	toggleStroke.Parent = toggleBtn
+
+	-- ── Главная панель статов ─────────────────────────────────────────
+	local panel = Instance.new("Frame")
+	panel.Name = "StatsPanel"
+	panel.Size = UDim2.new(0, 420, 0, 520)
+	panel.Position = UDim2.new(0, 80, 0.5, -260)
+	panel.BackgroundColor3 = COLORS.bg
+	panel.BorderSizePixel = 0
+	panel.Visible = false
+	panel.Parent = screenGui
+
+	local panelCorner = Instance.new("UICorner")
+	panelCorner.CornerRadius = UDim.new(0, 16)
+	panelCorner.Parent = panel
+
+	local panelStroke = Instance.new("UIStroke")
+	panelStroke.Color = COLORS.panelBorder
+	panelStroke.Thickness = 2
+	panelStroke.Parent = panel
+
+	-- Gradient overlay сверху
+	local gradient = Instance.new("UIGradient")
+	gradient.Color = ColorSequence.new{
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(18, 30, 70)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 14, 26)),
+	}
+	gradient.Rotation = 135
+	gradient.Parent = panel
+
+	-- Заголовок
+	local titleBar = Instance.new("Frame")
+	titleBar.Size = UDim2.new(1, 0, 0, 54)
+	titleBar.BackgroundColor3 = Color3.fromRGB(15, 25, 55)
+	titleBar.BorderSizePixel = 0
+	titleBar.Parent = panel
+	Instance.new("UICorner").CornerRadius = UDim.new(0, 16)
+	Instance.new("UICorner").Parent = titleBar
+
+	-- Нижняя часть titleBar без скруглений (перекрываем)
+	local titleFix = Instance.new("Frame")
+	titleFix.Size = UDim2.new(1, 0, 0, 16)
+	titleFix.Position = UDim2.new(0, 0, 1, -16)
+	titleFix.BackgroundColor3 = Color3.fromRGB(15, 25, 55)
+	titleFix.BorderSizePixel = 0
+	titleFix.Parent = titleBar
+
+	local titleLabel = Instance.new("TextLabel")
+	titleLabel.Size = UDim2.new(1, -60, 1, 0)
+	titleLabel.Position = UDim2.new(0, 16, 0, 0)
+	titleLabel.BackgroundTransparency = 1
+	titleLabel.Text = "⚡  РАСПРЕДЕЛЕНИЕ СТАТОВ"
+	titleLabel.TextColor3 = COLORS.accentGlow
+	titleLabel.Font = Enum.Font.GothamBold
+	titleLabel.TextSize = 18
+	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+	titleLabel.Parent = titleBar
+
+	-- Кнопка закрытия
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Size = UDim2.new(0, 36, 0, 36)
+	closeBtn.Position = UDim2.new(1, -46, 0, 9)
+	closeBtn.BackgroundColor3 = Color3.fromRGB(150, 30, 30)
+	closeBtn.BorderSizePixel = 0
+	closeBtn.Text = "✕"
+	closeBtn.TextColor3 = Color3.fromRGB(255, 200, 200)
+	closeBtn.Font = Enum.Font.GothamBold
+	closeBtn.TextSize = 16
+	closeBtn.Parent = titleBar
+	Instance.new("UICorner").CornerRadius = UDim.new(0, 8)
+	Instance.new("UICorner").Parent = closeBtn
+
+	-- Блок уровня и exp
+	local infoBlock = Instance.new("Frame")
+	infoBlock.Name = "InfoBlock"
+	infoBlock.Size = UDim2.new(1, -24, 0, 60)
+	infoBlock.Position = UDim2.new(0, 12, 0, 62)
+	infoBlock.BackgroundColor3 = COLORS.panel
+	infoBlock.BorderSizePixel = 0
+	infoBlock.Parent = panel
+	Instance.new("UICorner").CornerRadius = UDim.new(0, 10)
+	Instance.new("UICorner").Parent = infoBlock
+
+	local levelBig = Instance.new("TextLabel")
+	levelBig.Name = "LevelBig"
+	levelBig.Size = UDim2.new(0, 110, 1, 0)
+	levelBig.Position = UDim2.new(0, 12, 0, 0)
+	levelBig.BackgroundTransparency = 1
+	levelBig.Text = "УРОВЕНЬ 1"
+	levelBig.TextColor3 = COLORS.gold
+	levelBig.Font = Enum.Font.GothamBold
+	levelBig.TextSize = 20
+	levelBig.TextXAlignment = Enum.TextXAlignment.Left
+	levelBig.Parent = infoBlock
+
+	local expInfo = Instance.new("TextLabel")
+	expInfo.Name = "ExpInfo"
+	expInfo.Size = UDim2.new(1, -130, 0, 20)
+	expInfo.Position = UDim2.new(0, 125, 0, 8)
+	expInfo.BackgroundTransparency = 1
+	expInfo.Text = "EXP: 0 / 100"
+	expInfo.TextColor3 = COLORS.textDim
+	expInfo.Font = Enum.Font.Gotham
+	expInfo.TextSize = 13
+	expInfo.TextXAlignment = Enum.TextXAlignment.Left
+	expInfo.Parent = infoBlock
+
+	local expBarBig = Instance.new("Frame")
+	expBarBig.Size = UDim2.new(1, -130, 0, 10)
+	expBarBig.Position = UDim2.new(0, 125, 0, 34)
+	expBarBig.BackgroundColor3 = COLORS.expBg
+	expBarBig.BorderSizePixel = 0
+	expBarBig.Parent = infoBlock
+	Instance.new("UICorner").CornerRadius = UDim.new(1, 0)
+	Instance.new("UICorner").Parent = expBarBig
+
+	local expBarFill = Instance.new("Frame")
+	expBarFill.Name = "ExpBarFill"
+	expBarFill.Size = UDim2.new(0, 0, 1, 0)
+	expBarFill.BackgroundColor3 = COLORS.expBar
+	expBarFill.BorderSizePixel = 0
+	expBarFill.Parent = expBarBig
+	Instance.new("UICorner").CornerRadius = UDim.new(1, 0)
+	Instance.new("UICorner").Parent = expBarFill
+
+	-- Свободные очки
+	local freeLabel = Instance.new("TextLabel")
+	freeLabel.Name = "FreeLabel"
+	freeLabel.Size = UDim2.new(1, -24, 0, 30)
+	freeLabel.Position = UDim2.new(0, 12, 0, 130)
+	freeLabel.BackgroundTransparency = 1
+	freeLabel.Text = "✦ Свободных очков: 0"
+	freeLabel.TextColor3 = COLORS.gold
+	freeLabel.Font = Enum.Font.GothamBold
+	freeLabel.TextSize = 16
+	freeLabel.TextXAlignment = Enum.TextXAlignment.Left
+	freeLabel.Parent = panel
+
+	-- ── Контейнер для строк статов ────────────────────────────────────
+	local statsContainer = Instance.new("Frame")
+	statsContainer.Name = "StatsContainer"
+	statsContainer.Size = UDim2.new(1, -24, 0, 310)
+	statsContainer.Position = UDim2.new(0, 12, 0, 165)
+	statsContainer.BackgroundTransparency = 1
+	statsContainer.Parent = panel
+
+	local listLayout = Instance.new("UIListLayout")
+	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	listLayout.Padding = UDim.new(0, 6)
+	listLayout.Parent = statsContainer
+
+	-- ── Создание строки для каждого стата ────────────────────────────
+	local statRows = {}
+	local STAT_ORDER = {"Melee", "Defense", "Sword", "Gun", "BloxFruit"}
+	local STAT_LABELS = {
+		Melee     = "Рукопашный бой",
+		Defense   = "Защита",
+		Sword     = "Меч",
+		Gun       = "Оружие",
+		BloxFruit = "Блокс-фрукт",
+	}
+	local STAT_DESC = {
+		Melee     = "+2% урон кулаком",
+		Defense   = "+5 макс. HP",
+		Sword     = "+2% урон мечом",
+		Gun       = "+2% урон пушкой",
+		BloxFruit = "+2% урон фруктом",
+	}
+
+	for i, statName in ipairs(STAT_ORDER) do
+		local color = COLORS.statColors[statName]
+
+		local row = Instance.new("Frame")
+		row.Name = statName .. "Row"
+		row.Size = UDim2.new(1, 0, 0, 56)
+		row.BackgroundColor3 = COLORS.panel
+		row.BorderSizePixel = 0
+		row.LayoutOrder = i
+		row.Parent = statsContainer
+		Instance.new("UICorner").CornerRadius = UDim.new(0, 10)
+		Instance.new("UICorner").Parent = row
+
+		-- Цветная левая полоска
+		local accent = Instance.new("Frame")
+		accent.Size = UDim2.new(0, 4, 1, -12)
+		accent.Position = UDim2.new(0, 6, 0, 6)
+		accent.BackgroundColor3 = color
+		accent.BorderSizePixel = 0
+		accent.Parent = row
+		Instance.new("UICorner").CornerRadius = UDim.new(1, 0)
+		Instance.new("UICorner").Parent = accent
+
+		-- Название
+		local nameLabel = Instance.new("TextLabel")
+		nameLabel.Size = UDim2.new(0, 160, 0, 28)
+		nameLabel.Position = UDim2.new(0, 20, 0, 6)
+		nameLabel.BackgroundTransparency = 1
+		nameLabel.Text = STAT_LABELS[statName]
+		nameLabel.TextColor3 = COLORS.text
+		nameLabel.Font = Enum.Font.GothamBold
+		nameLabel.TextSize = 14
+		nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+		nameLabel.Parent = row
+
+		-- Описание
+		local descLabel = Instance.new("TextLabel")
+		descLabel.Size = UDim2.new(0, 160, 0, 18)
+		descLabel.Position = UDim2.new(0, 20, 0, 32)
+		descLabel.BackgroundTransparency = 1
+		descLabel.Text = STAT_DESC[statName]
+		descLabel.TextColor3 = COLORS.textDim
+		descLabel.Font = Enum.Font.Gotham
+		descLabel.TextSize = 11
+		descLabel.TextXAlignment = Enum.TextXAlignment.Left
+		descLabel.Parent = row
+
+		-- Значение
+		local valueLabel = Instance.new("TextLabel")
+		valueLabel.Name = "Value"
+		valueLabel.Size = UDim2.new(0, 60, 1, 0)
+		valueLabel.Position = UDim2.new(0, 195, 0, 0)
+		valueLabel.BackgroundTransparency = 1
+		valueLabel.Text = "0"
+		valueLabel.TextColor3 = color
+		valueLabel.Font = Enum.Font.GothamBold
+		valueLabel.TextSize = 28
+		valueLabel.Parent = row
+
+		-- Кнопка +
+		local plusBtn = Instance.new("TextButton")
+		plusBtn.Name = "PlusBtn"
+		plusBtn.Size = UDim2.new(0, 44, 0, 44)
+		plusBtn.Position = UDim2.new(1, -54, 0.5, -22)
+		plusBtn.BackgroundColor3 = COLORS.btnNormal
+		plusBtn.BorderSizePixel = 0
+		plusBtn.Text = "+"
+		plusBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		plusBtn.Font = Enum.Font.GothamBold
+		plusBtn.TextSize = 24
+		plusBtn.Parent = row
+		Instance.new("UICorner").CornerRadius = UDim.new(0, 8)
+		Instance.new("UICorner").Parent = plusBtn
+
+		local plusStroke = Instance.new("UIStroke")
+		plusStroke.Color = color
+		plusStroke.Thickness = 1.5
+		plusStroke.Parent = plusBtn
+
+		-- Hover анимация кнопки +
+		plusBtn.MouseEnter:Connect(function()
+			TweenService:Create(plusBtn, TweenInfo.new(0.12), {BackgroundColor3 = COLORS.btnHover}):Play()
+		end)
+		plusBtn.MouseLeave:Connect(function()
+			TweenService:Create(plusBtn, TweenInfo.new(0.12), {BackgroundColor3 = COLORS.btnNormal}):Play()
+		end)
+
+		-- Клик — тратим очко
+		plusBtn:GetPropertyChangedSignal("Text"):Connect(function() end)
+		plusBtn.Activated:Connect(function()
+			if currentData.freePoints <= 0 then
+				-- Анимация "нет очков"
+				TweenService:Create(plusBtn, TweenInfo.new(0.05), {BackgroundColor3 = Color3.fromRGB(150,30,30)}):Play()
+				task.wait(0.12)
+				TweenService:Create(plusBtn, TweenInfo.new(0.12), {BackgroundColor3 = COLORS.btnNormal}):Play()
+				return
+			end
+			SpendPoint:FireServer(statName)
+			-- Анимация нажатия
+			TweenService:Create(plusBtn, TweenInfo.new(0.05), {BackgroundColor3 = COLORS.btnPress}):Play()
+			task.wait(0.1)
+			TweenService:Create(plusBtn, TweenInfo.new(0.1), {BackgroundColor3 = COLORS.btnNormal}):Play()
+		end)
+
+		statRows[statName] = {value = valueLabel, plus = plusBtn}
+	end
+
+	-- ── Подсказка ─────────────────────────────────────────────────────
+	local hint = Instance.new("TextLabel")
+	hint.Size = UDim2.new(1, -24, 0, 20)
+	hint.Position = UDim2.new(0, 12, 1, -28)
+	hint.BackgroundTransparency = 1
+	hint.Text = "Нажми [M] или кнопку 📊 для открытия / закрытия"
+	hint.TextColor3 = COLORS.textDim
+	hint.Font = Enum.Font.Gotham
+	hint.TextSize = 11
+	hint.Parent = panel
+
+	-- ── Уведомление о левелапе ────────────────────────────────────────
+	local levelUpNotif = Instance.new("Frame")
+	levelUpNotif.Name = "LevelUpNotif"
+	levelUpNotif.Size = UDim2.new(0, 360, 0, 80)
+	levelUpNotif.Position = UDim2.new(0.5, -180, 0, -90)
+	levelUpNotif.BackgroundColor3 = COLORS.gold
+	levelUpNotif.BorderSizePixel = 0
+	levelUpNotif.Visible = false
+	levelUpNotif.Parent = screenGui
+	Instance.new("UICorner").CornerRadius = UDim.new(0, 14)
+	Instance.new("UICorner").Parent = levelUpNotif
+
+	local levelUpText = Instance.new("TextLabel")
+	levelUpText.Size = UDim2.new(1, 0, 1, 0)
+	levelUpText.BackgroundTransparency = 1
+	levelUpText.Text = "⬆  НОВЫЙ УРОВЕНЬ!"
+	levelUpText.TextColor3 = Color3.fromRGB(30, 20, 0)
+	levelUpText.Font = Enum.Font.GothamBold
+	levelUpText.TextSize = 26
+	levelUpText.Parent = levelUpNotif
+
+	-- ── Функция: обновить UI ──────────────────────────────────────────
+	local function updateUI(data)
+		if data.levelUpNotify then
+			-- Анимация уведомления
+			levelUpText.Text = "⬆  УРОВЕНЬ " .. data.newLevel .. "!"
+			levelUpNotif.Visible = true
+			levelUpNotif.Position = UDim2.new(0.5, -180, 0, -90)
+
+			TweenService:Create(levelUpNotif, TweenInfo.new(0.4, Enum.EasingStyle.Back), {
+				Position = UDim2.new(0.5, -180, 0, 20)
+			}):Play()
+
+			task.delay(2.5, function()
+				TweenService:Create(levelUpNotif, TweenInfo.new(0.3), {
+					Position = UDim2.new(0.5, -180, 0, -90)
+				}):Play()
+				task.wait(0.3)
+				levelUpNotif.Visible = false
+			end)
+			return
+		end
+
+		-- Обновляем данные
+		for k, v in pairs(data) do
+			currentData[k] = v
+		end
+
+		-- HUD
+		local lvlText = "Lv." .. currentData.level
+		if currentData.level >= currentData.maxLevel then lvlText = "MAX" end
+		hud.HudLevel.Text = lvlText
+
+		local pct = 0
+		if currentData.expNeeded > 0 and currentData.level < currentData.maxLevel then
+			pct = math.clamp(currentData.exp / currentData.expNeeded, 0, 1)
+		end
+		hud.ExpBarBg.ExpBar.Size = UDim2.new(pct, 0, 1, 0)
+		hud.ExpLabel.Text = "EXP: " .. currentData.exp .. " / " .. currentData.expNeeded
+
+		if currentData.freePoints > 0 then
+			pointsHud.Text = "✦ " .. currentData.freePoints .. " очков не распределено!"
+		else
+			pointsHud.Text = ""
+		end
+
+		-- Панель
+		levelBig.Text = "УРОВЕНЬ " .. currentData.level
+		expInfo.Text = "EXP: " .. currentData.exp .. " / " .. currentData.expNeeded
+		expBarFill.Size = UDim2.new(pct, 0, 1, 0)
+
+		local fp = currentData.freePoints
+		if fp > 0 then
+			freeLabel.Text = "✦ Свободных очков: " .. fp
+			freeLabel.TextColor3 = COLORS.gold
+		else
+			freeLabel.Text = "Нет свободных очков"
+			freeLabel.TextColor3 = COLORS.textDim
+		end
+
+		-- Строки статов
+		for statName, row in pairs(statRows) do
+			local val = currentData.stats[statName] or 0
+			row.value.Text = tostring(val)
+			-- Затемняем кнопку если нет очков
+			row.plus.BackgroundTransparency = fp <= 0 and 0.4 or 0
+		end
+	end
+
+	-- ── Показ/скрытие панели ─────────────────────────────────────────
+	local function togglePanel()
+		guiVisible = not guiVisible
+		panel.Visible = guiVisible
+		if guiVisible then
+			panel.Size = UDim2.new(0, 0, 0, 0)
+			panel.Position = UDim2.new(0, 80, 0.5, 0)
+			TweenService:Create(panel, TweenInfo.new(0.25, Enum.EasingStyle.Back), {
+				Size = UDim2.new(0, 420, 0, 520),
+				Position = UDim2.new(0, 80, 0.5, -260)
+			}):Play()
+		end
+	end
+
+	toggleBtn.Activated:Connect(togglePanel)
+	closeBtn.Activated:Connect(function()
+		guiVisible = false
+		panel.Visible = false
+	end)
+
+	-- Клавиша M
+	UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+		if input.KeyCode == Enum.KeyCode.M then
+			togglePanel()
+		end
+	end)
+
+	-- ── Слушаем обновления с сервера ─────────────────────────────────
+	UpdateStatsUI.OnClientEvent:Connect(updateUI)
+
+	-- ── Запрашиваем данные при старте ────────────────────────────────
+	task.spawn(function()
+		task.wait(1) -- ждём загрузки сервера
+		local data = GetPlayerStats:InvokeServer()
+		if data then
+			updateUI(data)
+		end
+	end)
+
+	return screenGui
+end
+
+-- Запускаем
+createGui()
+-- ╔══════════════════════════════════════════════════════════════════╗
+-- ║         ПРИМЕР СКРИПТА МОБА — выдаёт EXP при смерти             ║
+-- ║   Вставить в: каждый NPC-моб, в папку Model > MobScript (Script) ║
+-- ║                                                                  ║
+-- ║   Настрой: MOB_NAME, MOB_HEALTH, MOB_EXP_REWARD                  ║
+-- ║   Убедись что у моба есть Humanoid и HumanoidRootPart             ║
+-- ╚══════════════════════════════════════════════════════════════════╝
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- ── Настройки моба ────────────────────────────────────────────────────
+local MOB_NAME       = "Бандит"     -- Имя моба (появится над головой)
+local MOB_HEALTH     = 100          -- Хп моба
+local MOB_EXP_REWARD = 35           -- Сколько EXP даёт за убийство
+local MOB_RESPAWN    = 8            -- Секунды до респавна
+
+-- ── Ссылки ────────────────────────────────────────────────────────────
+local model     = script.Parent
+local humanoid  = model:WaitForChild("Humanoid")
+local rootPart  = model:WaitForChild("HumanoidRootPart")
+
+-- Ждём загрузки Remotes
+local Remotes  = ReplicatedStorage:WaitForChild("StatsRemotes", 15)
+local GiveExp  = Remotes and Remotes:WaitForChild("GiveExp")
+
+-- ── Имя над головой ───────────────────────────────────────────────────
+humanoid.DisplayName = MOB_NAME
+humanoid.MaxHealth   = MOB_HEALTH
+humanoid.Health      = MOB_HEALTH
+
+-- ── Откат урона (множитель стата атакующего) ─────────────────────────
+-- Урон уже применяется Roblox автоматически через инструменты
+-- Здесь только логика выдачи EXP при смерти
+
+-- ── Смерть моба ───────────────────────────────────────────────────────
+local function onDied()
+	-- Ищем, кто убил (последний атакующий через Tag или CreatorTag)
+	local killerPlayer = nil
+
+	-- Проверяем тег Creator (стандартный Roblox)
+	local creatorTag = humanoid:FindFirstChild("creator")
+	if creatorTag and creatorTag:IsA("ObjectValue") and creatorTag.Value then
+		local character = creatorTag.Value
+		killerPlayer = Players:GetPlayerFromCharacter(character)
+		if not killerPlayer then
+			-- Значение может быть напрямую игроком
+			if creatorTag.Value:IsA("Player") then
+				killerPlayer = creatorTag.Value
+			end
+		end
+	end
+
+	-- Если нашли игрока — выдаём EXP
+	if killerPlayer then
+		GiveExp:FireServer(killerPlayer, MOB_EXP_REWARD)
+		-- Прим.: GiveExp — это RemoteEvent, клиент стреляет на сервер.
+		-- Но мы в серверном скрипте. Нужна прямая логика.
+		-- Сервер обработает через OnServerEvent
+	end
+
+	-- Показываем "+EXP" FloatingText (опционально)
+	task.spawn(function()
+		local billboard = Instance.new("BillboardGui")
+		billboard.Size = UDim2.new(0, 100, 0, 40)
+		billboard.StudsOffset = Vector3.new(0, 3, 0)
+		billboard.AlwaysOnTop = true
+		billboard.Parent = rootPart
+
+		local lbl = Instance.new("TextLabel")
+		lbl.Size = UDim2.new(1, 0, 1, 0)
+		lbl.BackgroundTransparency = 1
+		lbl.Text = "+" .. MOB_EXP_REWARD .. " EXP"
+		lbl.TextColor3 = Color3.fromRGB(80, 255, 120)
+		lbl.Font = Enum.Font.GothamBold
+		lbl.TextSize = 18
+		lbl.Parent = billboard
+
+		task.wait(1.5)
+		billboard:Destroy()
+	end)
+
+	-- Скрываем моба
+	model:ScaleTo(0.001)
+	task.wait(0.5)
+	for _, part in ipairs(model:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Transparency = 1
+			part.CanCollide = false
+		end
+	end
+
+	-- Респавн
+	task.wait(MOB_RESPAWN)
+	humanoid.Health = MOB_HEALTH
+	for _, part in ipairs(model:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Transparency = 0
+			part.CanCollide = true
+		end
+	end
+	model:ScaleTo(1)
+end
+
+humanoid.Died:Connect(onDied)
+
+-- ── Тег атакующего (нужен в инструменте/оружии, но дефолтная логика) ─
+-- Если используешь стандартный Sword tool из Roblox — он сам ставит тег.
+-- Если кастомный — добавь в своё оружие:
+--   local tag = Instance.new("ObjectValue")
+--   tag.Name = "creator"
+--   tag.Value = player.Character  -- или player
+--   tag.Parent = enemyHumanoid
+--   game:GetService("Debris"):AddItem(tag, 2)
