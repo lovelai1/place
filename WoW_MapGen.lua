@@ -5375,28 +5375,28 @@ zoneFunctions["Zone7_Environment"] = function()
     
     -- ── 1. GLOBAL LIGHTING ──────────────────────────────────────────
     
-    Lighting.ClockTime          = 14.2          -- ~2:14 PM, long afternoon shadows
+    Lighting.ClockTime          = 15.1          -- slightly later afternoon, softer warm light
     Lighting.GeographicLatitude = 45            -- mid-latitude sun arc
-    Lighting.Brightness         = 2.2
-    Lighting.Ambient            = Color3.fromRGB(115, 118, 128)   -- cool blue-grey fill
-    Lighting.OutdoorAmbient     = Color3.fromRGB(148, 155, 165)
-    Lighting.ShadowSoftness     = 0.25
+    Lighting.Brightness         = 1.85
+    Lighting.Ambient            = Color3.fromRGB(108, 110, 118)
+    Lighting.OutdoorAmbient     = Color3.fromRGB(132, 138, 148)
+    Lighting.ShadowSoftness     = 0.42
     Lighting.GlobalShadows      = true
-    Lighting.FogEnd             = 1800
-    Lighting.FogStart           = 900
-    Lighting.FogColor           = Color3.fromRGB(195, 205, 215)
+    Lighting.FogEnd             = 1600
+    Lighting.FogStart           = 760
+    Lighting.FogColor           = Color3.fromRGB(180, 189, 202)
     
     print("[Env] Lighting base applied.")
     
     -- ── 2. ATMOSPHERE ────────────────────────────────────────────────
     
     local atmo = Instance.new("Atmosphere", Lighting)
-    atmo.Density     = 0.28
-    atmo.Offset      = 0.20
-    atmo.Color       = Color3.fromRGB(182, 198, 218)    -- pale sky-blue haze
-    atmo.Decay       = Color3.fromRGB(105, 115, 128)
-    atmo.Glare       = 0.12
-    atmo.Haze        = 1.4
+    atmo.Density     = 0.35
+    atmo.Offset      = 0.18
+    atmo.Color       = Color3.fromRGB(170, 185, 204)
+    atmo.Decay       = Color3.fromRGB(96, 104, 116)
+    atmo.Glare       = 0.08
+    atmo.Haze        = 1.9
     
     print("[Env] Atmosphere applied.")
     
@@ -5420,34 +5420,71 @@ zoneFunctions["Zone7_Environment"] = function()
     
     -- Colour correction — warm saturation boost for biome richness
     local cc = Instance.new("ColorCorrectionEffect", Lighting)
-    cc.Brightness  =  0.02
-    cc.Contrast    =  0.06
-    cc.Saturation  =  0.12
-    cc.TintColor   = Color3.fromRGB(252, 248, 242)    -- very slight warm tint
+    cc.Brightness  = -0.01
+    cc.Contrast    =  0.1
+    cc.Saturation  = -0.05
+    cc.TintColor   = Color3.fromRGB(236, 236, 236)
     cc.Enabled     = true
     
     -- Bloom — subtle glow on bright neon objects (lanterns, crystals, wisps)
     local bloom = Instance.new("BloomEffect", Lighting)
-    bloom.Intensity  = 0.55
-    bloom.Size       = 24
-    bloom.Threshold  = 0.92
+    bloom.Intensity  = 0.24
+    bloom.Size       = 18
+    bloom.Threshold  = 1.05
     bloom.Enabled    = true
     
     -- Sun rays (God rays from mountain/castle direction)
     local sunRays = Instance.new("SunRaysEffect", Lighting)
-    sunRays.Intensity = 0.08
-    sunRays.Spread    = 0.55
+    sunRays.Intensity = 0.03
+    sunRays.Spread    = 0.42
     sunRays.Enabled   = true
     
     -- Depth of field (very subtle — keeps game readable)
     local dof = Instance.new("DepthOfFieldEffect", Lighting)
-    dof.FarIntensity  = 0.18
-    dof.FocusDistance = 120
-    dof.InFocusRadius = 60
-    dof.NearIntensity = 0.05
+    dof.FarIntensity  = 0.11
+    dof.FocusDistance = 135
+    dof.InFocusRadius = 82
+    dof.NearIntensity = 0.02
     dof.Enabled       = true
     
     print("[Env] Post-processing effects applied.")
+
+    -- ── 4.5. GLOBAL VISUAL POLISH PASS ──────────────────────────────
+    -- Make map less toy-like: reduce pure-plastic look + soften extreme colors.
+    local zoneNames = {
+        "Highgard_Zone1","EmeraldHaven_Zone2","SunScorch_Zone3",
+        "SnowDust_Zone4","GloomWood_Zone5","FensOfDespair_Zone6"
+    }
+    local softened = 0
+    for _, zoneName in ipairs(zoneNames) do
+        local zf = workspace:FindFirstChild(zoneName)
+        if zf then
+            for _, obj in ipairs(zf:GetDescendants()) do
+                if obj:IsA("BasePart") then
+                    if obj.Material == Enum.Material.SmoothPlastic then
+                        local y = obj.Position.Y
+                        if y < 55 then
+                            obj.Material = Enum.Material.Ground
+                        elseif obj.Size.Y >= 8 then
+                            obj.Material = Enum.Material.Concrete
+                        else
+                            obj.Material = Enum.Material.Slate
+                        end
+                        softened += 1
+                    end
+
+                    local h, s, v = obj.Color:ToHSV()
+                    if s > 0.72 then
+                        obj.Color = Color3.fromHSV(h, s * 0.82, math.min(1, v * 0.96))
+                    end
+                    if v > 0.94 and obj.Material ~= Enum.Material.Neon then
+                        obj.Color = Color3.fromHSV(h, s, v * 0.94)
+                    end
+                end
+            end
+        end
+    end
+    print(string.format("[Env] Visual polish pass complete (%d plastic parts converted).", softened))
     
     -- ── 5. ZONE-LOCAL ATMOSPHERE OVERRIDES ──────────────────────────
     --  We use SelectionBoxes + SpecialMeshes only for zone
