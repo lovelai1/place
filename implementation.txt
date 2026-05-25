@@ -1,0 +1,32 @@
+Claude Implementation Notes
+
+Status: Added by Codex because the file was missing in the repository.
+
+Purpose
+- This repository now contains a Roblox Studio source-folder layout suitable for GitHub.
+- The structure is aligned with a Rojo-style `default.project.json` mapping.
+
+Implemented Structure
+- src/ReplicatedStorage
+- src/ServerScriptService
+- src/StarterPlayer/StarterPlayerScripts
+- src/StarterGui
+- src/Workspace
+- src/Lighting
+- src/SoundService
+- src/Teams
+
+Configuration
+- `default.project.json` maps Roblox DataModel services to `src/*` directories.
+- `.gitkeep` files are used so empty directories remain tracked by Git.
+
+What to do next
+1. Add real ModuleScripts/Scripts/LocalScripts into the corresponding folders.
+2. If using Rojo, run sync/build workflows with this `default.project.json`.
+3. Expand services as needed (e.g., `StarterPack`, `StarterCharacterScripts`, `Chat`, etc.).
+
+Acceptance Checklist
+- [x] `implementation.txt` exists in repository root.
+- [x] Base folder layout exists under `src/`.
+- [x] Mapping file `default.project.json` is present and valid JSON.
+- [x] README explains folder roles.
